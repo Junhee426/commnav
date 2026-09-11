@@ -29,15 +29,24 @@
           <h2><span>01</span> 위성군과 관측지</h2>
           <label class="field"><span>궤도 고도</span><select name="altitude" data-config="altitude"><option value="500">500 km</option><option value="888" selected>888 km</option><option value="1280">1,280 km</option></select></label>
           <div class="field-pair">
-            <label class="field"><span>궤도면 수</span><select name="planes" data-config="planes"><option value="8">8면 · 128기</option><option value="16" selected>16면 · 256기</option><option value="32">32면 · 512기</option></select></label>
+            <label class="field"><span>궤도면 수</span><input name="planes" data-config="planes" type="number" min="1" max="32" step="1" value="16"></label>
             <label class="field"><span>경사각 <small>°</small></span><input name="inclination" data-config="inclination" type="number" min="0" max="90" step="1" value="42"></label>
           </div>
-          <label class="field"><span>관측지</span><select name="location" data-config="location"><option value="seoul">서울 · 대한민국</option><option value="busan">부산 · 대한민국</option><option value="jeju">제주 · 대한민국</option><option value="abudhabi">아부다비 · UAE</option><option value="singapore">싱가포르</option><option value="jakarta">자카르타 · 인도네시아</option></select></label>
+          <label class="field"><span>궤도면당 위성 수 <small>기</small></span><input name="satellitesPerPlane" data-config="satellitesPerPlane" type="number" min="4" max="32" step="1" value="16" aria-describedby="constellation-note"></label>
+          <label class="field"><span>관측지</span><select name="location" data-config="location"><option value="seoul">서울 · 대한민국</option><option value="busan">부산 · 대한민국</option><option value="jeju">제주 · 대한민국</option><option value="abudhabi">아부다비 · UAE</option><option value="singapore">싱가포르</option><option value="jakarta">자카르타 · 인도네시아</option><option value="custom">위도·경도 직접 입력</option></select></label>
+          <div id="custom-location" hidden>
+            <div class="field-pair">
+              <label class="field"><span>위도 <small>°</small></span><input name="latitude" data-config="latitude" type="number" min="-90" max="90" step="any" value="37.5665" aria-describedby="coordinate-note" disabled></label>
+              <label class="field"><span>경도 <small>°</small></span><input name="longitude" data-config="longitude" type="number" min="-180" max="180" step="any" value="126.978" aria-describedby="coordinate-note" disabled></label>
+            </div>
+            <p id="coordinate-note" class="field-note">북위·동경은 양수, 남위·서경은 음수입니다. 관측자는 구형 지구 표면에 위치합니다.</p>
+          </div>
           <div class="field-pair">
             <label class="field"><span>통신 최소고도각 <small>°</small></span><input name="commElevation" data-config="commElevation" type="number" min="5" max="60" step="1" value="20"></label>
             <label class="field"><span>항법 최소고도각 <small>°</small></span><input name="navElevation" data-config="navElevation" type="number" min="5" max="60" step="1" value="10"></label>
           </div>
-          <p class="field-note">궤도면당 16기 · Walker Delta F=1</p>
+          <p id="constellation-note" class="field-note" aria-live="polite">16면 × 면당 16기 = 총 256기 · Walker Delta F=1</p>
+          <p class="field-note">궤도면 1–32개, 면당 4–32기 · 총 512기까지</p>
         </section>
         <section class="control-section">
           <h2><span>02</span> 항법 구성과 자원</h2>
@@ -114,7 +123,7 @@
         <section class="panel comparison-panel"><div class="panel-heading"><h3>항법 구성별 비교</h3><span id="comparison-context" class="small-value">같은 위성 배치·오차 가정</span></div><div class="table-scroll"><table><thead><tr><th scope="col">항법 구성</th><th scope="col">수평 RMS 중앙값</th><th scope="col">항법 목표 충족률</th></tr></thead><tbody id="comparison-rows"><tr><td colspan="3">분석 중</td></tr></tbody></table></div><p class="chart-note">중앙값은 측위 가능한 표본에서 계산합니다. 충족률에는 측위 불가 표본도 포함합니다.</p></section>
         <section class="panel resource-panel"><div class="panel-heading"><h3>항법 배정시간을 바꾸면</h3><span id="sweep-context" class="small-value">현재 배치 · 시간 공유 가정</span></div><p class="resource-intro">현재 입력값을 유지하고 항법 시간을 0–40%로 변경한 비교입니다. 신호 분리 모드에서도 시간 공유 전환 시의 변화를 보여줍니다.</p><div class="analysis-charts"><div><h4>통신 처리량</h4><div id="resource-rate-chart" class="chart"></div></div><div><h4>예측 수평 RMS</h4><div id="resource-nav-chart" class="chart"></div></div></div><p class="chart-note">신호 공유 시 항법 탑재 위성의 통신 시간을 차감합니다. 실제 파형·수신기 성능 검증은 포함하지 않습니다.</p></section>
       </section>
-      <footer class="workspace-footer"><span>K-LEO COMM / PNT · v1.0</span><span>설계 비교용 · 가정은 ‘모델·가정’에서 확인</span></footer>
+      <footer class="workspace-footer"><span>K-LEO COMM / PNT · v1.1</span><span>설계 비교용 · 가정은 ‘모델·가정’에서 확인</span></footer>
     </main>
   </div>
   <dialog id="model-dialog" aria-labelledby="model-title">

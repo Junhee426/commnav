@@ -103,6 +103,43 @@ test('24-hour summary counts unavailable samples and excludes them only from con
   const sum=summarize(samples,cfg);close(sum.jointAvailability,50);close(sum.medianHrms,2);close(sum.validNavAvailability,50);assert.equal(sum.minLEO,0);
 });
 
+test('custom coordinates reproduce each preset at the same position', () => {
+  for (const [location, { lat, lon }] of Object.entries(LOCATIONS)) {
+    const preset = snapshot({ ...cfg, location }, 345);
+    const custom = snapshot({ ...cfg, location: 'custom', latitude: lat, longitude: lon }, 345);
+    assert.deepEqual(compactSample(custom), compactSample(preset));
+    assert.deepEqual(custom.observer, preset.observer);
+  }
+});
+
+test('custom observer coordinates handle poles and the date line and reject invalid inputs', () => {
+  for (const latitude of [-90, 0, 90]) for (const longitude of [-180, 0, 180]) {
+    const s = snapshot({ ...cfg, location: 'custom', latitude, longitude });
+    close(norm(s.observer), EARTH_RADIUS, 1e-7);
+    assert.ok(Number.isFinite(s.rate));
+    assert.ok(s.satellites.every(sat => Number.isFinite(sat.elevation) && Number.isFinite(sat.range)));
+  }
+  for (const patch of [{ latitude: 90.01 }, { latitude: -91 }, { longitude: 181 }, { longitude: -181 }, { latitude: NaN }, { longitude: '126' }]) {
+    assert.throws(() => validateConfig({ ...cfg, location: 'custom', ...patch }));
+  }
+});
+
+test('custom constellation sizes propagate through snapshots and resource sweeps', () => {
+  for (const [planes, satellitesPerPlane] of [[1, 4], [7, 12], [16, 32], [32, 16]]) {
+    const used = { ...cfg, planes, satellitesPerPlane, location: 'custom', latitude: -33.87, longitude: 151.21 };
+    const s = snapshot(used, 60);
+    assert.equal(s.satellites.filter(sat => sat.group === 'LEO').length, planes * satellitesPerPlane);
+    assert.equal(s.payloadCount, planes * satellitesPerPlane);
+    const point = resourceSweep(used, 60)[5];
+    const shared = snapshot({ ...used, sharing: 'time', navShare: 10 }, 60);
+    close(point.rate, shared.rate);
+    assert.equal(point.hrms, shared.fusion.hrms);
+  }
+  for (const patch of [{ planes: 1.5 }, { satellitesPerPlane: 4.5 }, { satellitesPerPlane: 3 }, { planes: 17, satellitesPerPlane: 32 }]) {
+    assert.throws(() => validateConfig({ ...cfg, ...patch }));
+  }
+});
+
 test('all regional presets and a full day produce finite rates and consistent covariance results', () => {
   for(const location of Object.keys(LOCATIONS)) for(const altitude of [500,888,1280]) for(const regional of [false,true]) {
     for(const minutes of [0,345,1080]){

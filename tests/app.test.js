@@ -46,6 +46,7 @@ function startApp() {
   form.querySelectorAll = () => fields;
   form.elements = Object.fromEntries(fields.map(field => [field.dataset.config, field]));
   const workers = [];
+  const centers = [];
   class Worker {
     constructor() { workers.push(this); }
     postMessage(message) { this.request = message; }
@@ -64,7 +65,7 @@ function startApp() {
   runInNewContext(source, {
     ...engine, document,
     window: { matchMedia: () => ({ matches: false }) },
-    Globe: class { set() {} center() {} draw() {} },
+    Globe: class { set() {} center(lat, lon) { centers.push([lat, lon]); } draw() {} },
     skyPlot() {}, lineChart() {},
     ResizeObserver: class { observe() {} },
     Worker, URL, setTimeout, clearTimeout, setInterval, clearInterval,
@@ -74,7 +75,7 @@ function startApp() {
     form.dispatchEvent(event);
     assert.equal(event.defaultPrevented, true, 'form submission must not reload the page');
   };
-  return { get, form, workers, submit };
+  return { get, form, workers, submit, centers };
 }
 
 test('submitting settings reruns analysis with the latest input and opens the results', () => {
@@ -127,4 +128,46 @@ test('a failed analysis restores the controls and allows a retry', async () => {
   submit();
   assert.equal(workers.length, 3);
   workers[2].complete();
+});
+
+test('custom observer and constellation settings reach analysis and recenter the globe', () => {
+  const { get, form, workers, submit, centers } = startApp();
+  workers[0].complete();
+  form.elements.location.value = 'custom';
+  form.elements.latitude.value = '-33.87';
+  form.elements.longitude.value = '151.21';
+  form.elements.planes.value = '7';
+  form.elements.satellitesPerPlane.value = '12';
+  submit();
+  assert.equal(get('custom-location').hidden, false);
+  assert.equal(form.elements.latitude.disabled, false);
+  assert.deepEqual(centers.at(-1), [-33.87, 151.21]);
+  assert.equal(workers[1].request.config.satellitesPerPlane, 12);
+  assert.equal(get('fleet-count').textContent, 'LEO 84기');
+  workers[1].complete();
+  assert.match(get('analysis-note').textContent, /-33.87°, 151.21°/);
+  form.elements.latitude.value = '-20';
+  submit();
+  assert.deepEqual(centers.at(-1), [-20, 151.21]);
+  assert.equal(get('analysis-note').classList.contains('stale'), true);
+  workers[2].complete();
+  assert.match(get('analysis-note').textContent, /-20°, 151.21°/);
+  form.elements.location.value = 'seoul';
+  submit();
+  assert.equal(get('custom-location').hidden, true);
+  assert.equal(form.elements.latitude.disabled, true);
+  assert.deepEqual(centers.at(-1), [37.5665, 126.978]);
+  workers[3].complete();
+});
+
+test('an excessive constellation reports an error and preserves the last valid result', async () => {
+  const { get, form, workers, submit } = startApp();
+  workers[0].complete();
+  form.elements.planes.value = '32';
+  form.elements.satellitesPerPlane.value = '32';
+  submit();
+  await Promise.resolve();
+  assert.equal(workers.length, 1);
+  assert.match(get('config-error').textContent, /512/);
+  assert.equal(get('fleet-count').textContent, 'LEO 256기');
 });
