@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#091221">
+  <meta name="description" content="K-LEO 위성 배치와 통신·항법 성능을 함께 비교하는 설계 시뮬레이터. 신호 공유, 위성시계·궤도 오차, 지역별 접속과 위치오차를 분석합니다.">
+  <title>K-LEO | 통신·항법 통합 시뮬레이터</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23091221'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%2348d4f0' stroke-width='2'/%3E%3Cellipse cx='16' cy='16' rx='14' ry='5' transform='rotate(-35 16 16)' fill='none' stroke='%23f6b75b' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">분석 화면으로 이동</a>
+  <header class="app-header">
+    <div class="identity"><span class="brand-mark" aria-hidden="true">K</span><div><strong>K-LEO <span>COMM / PNT</span></strong><p>통신·항법 통합 시뮬레이터</p></div></div>
+    <nav class="tabs" role="tablist" aria-label="작업 화면">
+      <button id="tab-situation" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="situation">상황 화면</button>
+      <button id="tab-analysis" class="tab" type="button" role="tab" aria-selected="false" aria-controls="analysis">성능 분석</button>
+    </nav>
+    <button id="open-model" class="button subtle" type="button">모델·가정</button>
+  </header>
+  <div class="model-banner"><span class="tag">설계모형</span><span>원궤도·가상 항법망 기반 예측값</span><span class="banner-end">실제 KPS·K-LEO 운용 성능과 구분</span></div>
+  <div class="app-layout">
+    <aside class="sidebar" aria-label="시나리오 설정">
+      <div class="sidebar-title"><h1>시나리오 설정</h1><span id="fleet-count" class="small-value">LEO 256기</span></div>
+      <form id="configuration" novalidate>
+        <section class="control-section">
+          <h2><span>01</span> 위성군과 관측지</h2>
+          <label class="field"><span>궤도 고도</span><select name="altitude" data-config="altitude"><option value="500">500 km</option><option value="888" selected>888 km</option><option value="1280">1,280 km</option></select></label>
+          <div class="field-pair">
+            <label class="field"><span>궤도면 수</span><select name="planes" data-config="planes"><option value="8">8면 · 128기</option><option value="16" selected>16면 · 256기</option><option value="32">32면 · 512기</option></select></label>
+            <label class="field"><span>경사각 <small>°</small></span><input name="inclination" data-config="inclination" type="number" min="0" max="90" step="1" value="42"></label>
+          </div>
+          <label class="field"><span>관측지</span><select name="location" data-config="location"><option value="seoul">서울 · 대한민국</option><option value="busan">부산 · 대한민국</option><option value="jeju">제주 · 대한민국</option><option value="abudhabi">아부다비 · UAE</option><option value="singapore">싱가포르</option><option value="jakarta">자카르타 · 인도네시아</option></select></label>
+          <div class="field-pair">
+            <label class="field"><span>통신 최소고도각 <small>°</small></span><input name="commElevation" data-config="commElevation" type="number" min="5" max="60" step="1" value="20"></label>
+            <label class="field"><span>항법 최소고도각 <small>°</small></span><input name="navElevation" data-config="navElevation" type="number" min="5" max="60" step="1" value="10"></label>
+          </div>
+          <p class="field-note">궤도면당 16기 · Walker Delta F=1</p>
+        </section>
+        <section class="control-section">
+          <h2><span>02</span> 항법 구성과 자원</h2>
+          <label class="check-field"><input name="leoNav" data-config="leoNav" type="checkbox" checked><span>LEO 항법 탑재체 사용</span></label>
+          <label class="field"><span>항법 탑재 위성 비율 <output id="payload-value">100%</output></span><input name="payloadPercent" data-config="payloadPercent" type="range" min="0" max="100" step="25" value="100"></label>
+          <label class="field"><span>통신·항법 신호 구성</span><select name="sharing" data-config="sharing"><option value="separate">신호 분리 · 플랫폼 공유</option><option value="time">시간 공유 · 자원 배분</option></select></label>
+          <label class="field" id="share-field"><span>항법 배정시간 <output id="share-value">10%</output></span><input name="navShare" data-config="navShare" type="range" min="0" max="40" step="1" value="10" disabled></label>
+          <p class="field-note" id="sharing-note">신호 분리 모드에서는 통신 시간을 차감하지 않습니다.</p>
+          <label class="check-field"><input name="regional" data-config="regional" type="checkbox"><span>지역항법 8기 예시 추가</span></label>
+          <p class="field-note">3 GEO + 5 IGSO 가상 배치 · 공식 KPS 궤도 아님</p>
+        </section>
+        <section class="control-section">
+          <h2><span>03</span> 항법 오차 가정</h2>
+          <div class="field-pair">
+            <label class="field"><span>LEO 시계오차 <small>ns</small></span><input name="clockNs" data-config="clockNs" type="number" min="0" max="1000" step="1" value="3"></label>
+            <label class="field"><span>LEO 궤도오차 <small>m</small></span><input name="orbitSigma" data-config="orbitSigma" type="number" min="0" max="30" step="0.1" value="1"></label>
+          </div>
+          <div class="field-pair">
+            <label class="field"><span>LEO 측정잡음 <small>m</small></span><input name="leoSigma" data-config="leoSigma" type="number" min="0.1" max="30" step="0.1" value="1.5"></label>
+            <label class="field"><span>GNSS 거리오차 <small>m</small></span><input name="gnssSigma" data-config="gnssSigma" type="number" min="0.1" max="30" step="0.1" value="3"></label>
+          </div>
+          <p class="field-note">모두 표준편차. LEO 잡음은 거리 1,000 km 기준입니다.</p>
+        </section>
+        <details class="control-section advanced">
+          <summary>통신 링크와 서비스 목표</summary>
+          <div class="field-pair">
+            <label class="field"><span>EIRP <small>dBW</small></span><input name="eirp" data-config="eirp" type="number" min="20" max="65" step="1" value="45"></label>
+            <label class="field"><span>수신 G/T <small>dB/K</small></span><input name="gt" data-config="gt" type="number" min="-10" max="30" step="1" value="5"></label>
+          </div>
+          <div class="field-pair">
+            <label class="field"><span>대역폭 <small>MHz</small></span><input name="bandwidth" data-config="bandwidth" type="number" min="1" max="500" step="1" value="100"></label>
+            <label class="field"><span>주파수 <small>GHz</small></span><input name="frequency" data-config="frequency" type="number" min="10" max="40" step="1" value="20"></label>
+          </div>
+          <label class="field"><span>추가 강우감쇠 <small>dB</small></span><input name="rainLoss" data-config="rainLoss" type="number" min="0" max="40" step="1" value="4"></label>
+          <div class="field-pair">
+            <label class="field"><span>수평 RMS 목표 <small>m 이하</small></span><input name="horizontalTarget" data-config="horizontalTarget" type="number" min="0.1" max="100" step="0.1" value="10"></label>
+            <label class="field"><span>통신 목표 <small>Mbps 이상</small></span><input name="rateTarget" data-config="rateTarget" type="number" min="1" max="1000" step="1" value="100"></label>
+          </div>
+        </details>
+        <div id="config-error" class="error-box" role="alert" hidden></div>
+        <div class="run-controls"><button id="run-analysis" class="button primary" type="submit">24시간 비교 분석</button><span id="run-status" class="field-note" aria-live="polite">5분 간격 · 288개 표본</span><progress id="analysis-progress" max="100" value="0" hidden aria-label="분석 진행률"></progress></div>
+      </form>
+    </aside>
+    <main id="workspace">
+      <section id="situation" role="tabpanel" aria-labelledby="tab-situation">
+        <div class="workspace-heading"><div><p class="eyebrow">CONSTELLATION VIEW</p><h2>위성 배치와 동시 접속</h2></div><div id="observer-label" class="location-label">서울 <span>37.57° N / 126.98° E</span></div></div>
+        <div class="metrics snapshot-metrics" aria-live="polite">
+          <article class="metric"><span>단일 다운링크 추정 처리량</span><strong id="current-rate">— <small>Mbps</small></strong><p id="current-link">접속 위성 계산 중</p></article>
+          <article class="metric"><span>융합 항법 예측 수평 RMS</span><strong id="current-nav">— <small>m</small></strong><p id="current-baseline">GNSS 단독과 비교</p></article>
+          <article class="metric"><span>현재 서비스 목표</span><strong id="current-joint" class="status-value">계산 중</strong><p id="current-targets">통신 ≥ 100 Mbps · 항법 ≤ 10 m</p></article>
+        </div>
+        <div class="scene-grid">
+          <section class="panel globe-panel">
+            <div class="panel-heading"><h3 id="globe-title">LEO 256기 · 888 km</h3><div class="inline-actions"><label class="sr-only" for="globe-scale">위성군 표시 범위</label><select id="globe-scale" class="compact-select"><option value="leo">LEO 확대</option><option value="all">전체 계층</option></select><button type="button" id="recenter" class="button small">관측지 중심</button></div></div>
+            <canvas id="globe" aria-label="위성군을 표시한 지구. 마우스 또는 손가락으로 회전할 수 있으며 관측지 선택과 관측지 중심 버튼으로도 이동할 수 있습니다." role="img"></canvas>
+            <div class="globe-legend"><span><i class="dot leo"></i>LEO 항법 접속</span><span><i class="line comm"></i>통신 접속</span><span>드래그하여 회전</span></div>
+            <div class="time-control"><button id="play" class="button small" type="button" aria-pressed="false">재생</button><label class="sr-only" for="time-slider">설계 기준시각 이후 경과 분</label><input id="time-slider" type="range" min="0" max="1435" step="5" value="0"><output id="time-label" for="time-slider">T + 00:00</output></div>
+          </section>
+          <section class="panel sky-panel">
+            <div class="panel-heading"><h3>관측지 하늘보기</h3><span id="nav-count" class="small-value">항법 위성 —기</span></div>
+            <div id="sky-plot"></div>
+            <div class="sky-legend"><span><i class="dot leo"></i>LEO</span><span><i class="square gnss"></i>GNSS</span><span id="regional-legend" hidden><i class="diamond regional"></i>지역항법 예시</span></div>
+            <dl class="compact-stats"><div><dt>통신 가시 LEO</dt><dd id="visible-comm">—기</dd></div><div><dt>항법 유효 LEO / GNSS</dt><dd id="visible-nav">— / —기</dd></div><div><dt>기하학적 PDOP</dt><dd id="pdop">—</dd></div><div><dt>수직 RMS</dt><dd id="vrms">— m</dd></div></dl>
+          </section>
+        </div>
+        <section class="panel link-panel"><div class="panel-heading"><h3>선택된 통신 링크</h3><span id="best-satellite" class="small-value">—</span></div><div class="link-values"><div><span>고도각</span><strong id="link-elevation">—</strong></div><div><span>경사거리</span><strong id="link-range">—</strong></div><div><span>편도 전파지연</span><strong id="link-delay">—</strong></div><div><span>C/N</span><strong id="link-snr">—</strong></div><div><span>도플러 편이</span><strong id="link-doppler">—</strong></div></div></section>
+        <p class="view-note">GNSS는 가상 24기 기준군입니다. 지도는 설계궤도를 표시하며, 편도 지연은 위성–사용자 구간만 포함합니다.</p>
+      </section>
+      <section id="analysis" role="tabpanel" aria-labelledby="tab-analysis" hidden>
+        <div class="workspace-heading"><div><p class="eyebrow">PERFORMANCE STUDY</p><h2>통신·항법 성능 비교</h2></div><button id="export-csv" class="button" type="button" disabled>결과 CSV</button></div>
+        <div id="analysis-note" class="analysis-note" aria-live="polite">기본 시나리오의 24시간 성능을 계산하고 있습니다.</div>
+        <div class="metrics analysis-metrics"><article class="metric"><span>동시 목표 충족률</span><strong id="joint-availability">— <small>%</small></strong><p>통신·항법 조건을 함께 충족한 표본</p></article><article class="metric"><span>통신 목표 충족률</span><strong id="comm-availability">— <small>%</small></strong><p id="rate-target-note">≥ 100 Mbps</p></article><article class="metric"><span>항법 목표 충족률</span><strong id="nav-availability">— <small>%</small></strong><p id="nav-target-note">수평 RMS ≤ 10 m</p></article></div>
+        <div class="analysis-charts"><section class="panel"><div class="panel-heading"><h3>시간별 위치오차</h3><span class="small-value">예측 수평 RMS</span></div><div class="chart-legend"><span><i class="line baseline"></i>GNSS 단독</span><span><i class="line leo"></i>선택한 항법 구성</span></div><div id="navigation-chart" class="chart"></div><p class="chart-note">공백은 측위 불가 구간입니다. 점선은 수평 RMS 목표입니다.</p></section><section class="panel"><div class="panel-heading"><h3>시간별 통신 처리량</h3><span class="small-value">최선의 단일 링크</span></div><div class="chart-legend"><span><i class="line comm"></i>추정 처리량</span><span>점선: 통신 목표</span></div><div id="communication-chart" class="chart"></div><p class="chart-note">가시 LEO가 없으면 0 Mbps로 계산합니다.</p></section></div>
+        <section class="panel comparison-panel"><div class="panel-heading"><h3>항법 구성별 비교</h3><span id="comparison-context" class="small-value">같은 위성 배치·오차 가정</span></div><div class="table-scroll"><table><thead><tr><th scope="col">항법 구성</th><th scope="col">수평 RMS 중앙값</th><th scope="col">항법 목표 충족률</th></tr></thead><tbody id="comparison-rows"><tr><td colspan="3">분석 중</td></tr></tbody></table></div><p class="chart-note">중앙값은 측위 가능한 표본에서 계산합니다. 충족률에는 측위 불가 표본도 포함합니다.</p></section>
+        <section class="panel resource-panel"><div class="panel-heading"><h3>항법 배정시간을 바꾸면</h3><span id="sweep-context" class="small-value">현재 배치 · 시간 공유 가정</span></div><p class="resource-intro">현재 입력값을 유지하고 항법 시간을 0–40%로 변경한 비교입니다. 신호 분리 모드에서도 시간 공유 전환 시의 변화를 보여줍니다.</p><div class="analysis-charts"><div><h4>통신 처리량</h4><div id="resource-rate-chart" class="chart"></div></div><div><h4>예측 수평 RMS</h4><div id="resource-nav-chart" class="chart"></div></div></div><p class="chart-note">신호 공유 시 항법 탑재 위성의 통신 시간을 차감합니다. 실제 파형·수신기 성능 검증은 포함하지 않습니다.</p></section>
+      </section>
+      <footer class="workspace-footer"><span>K-LEO COMM / PNT · v1.0</span><span>설계 비교용 · 가정은 ‘모델·가정’에서 확인</span></footer>
+    </main>
+  </div>
+  <dialog id="model-dialog" aria-labelledby="model-title">
+    <div class="dialog-heading"><div><p class="eyebrow">MODEL NOTES</p><h2 id="model-title">계산모델과 해석 범위</h2></div><button id="close-model" type="button" class="button small">닫기</button></div>
+    <div class="model-content">
+      <h3>위성군과 시각</h3><p>LEO는 원궤도 Walker Delta(F=1), GNSS는 고도 20,200 km·경사각 55°·6면×4기의 가상 기준군입니다. 기준시각의 지구 회전각을 0으로 두며 TLE·실제 달력시각을 사용하지 않습니다. 지구 반경 6,378.137 km의 구형 지구와 2체 궤도·지구 자전을 적용합니다.</p>
+      <p>지역항법 옵션은 GEO 경도 120°/128°/136°, IGSO 중심경도 128°·경사각 43°의 설명용 8기 배치입니다. 공식 KPS 설계궤도·성능값을 나타내지 않습니다.</p>
+      <h3>항법 오차</h3><p>위성별 거리측정에 가중최소제곱 공분산을 적용합니다. 수신기 위치 3축과 각 항법망의 공통 시각차를 함께 추정합니다. 위성이 부족하거나 기하행렬이 불안정하면 ‘측위 불가’로 처리합니다.</p>
+      <p>수평 RMS는 동·북 위치오차 분산 합의 제곱근입니다. 95% 신뢰반경이나 실제 측정오차를 뜻하지 않습니다. PDOP는 거리오차와 구분되는 기하학적 지표이며, 여기서는 항법망별 시각차를 포함한 모형을 사용합니다.</p>
+      <p>LEO 거리잡음은 입력값을 1,000 km에 대한 기준으로 두고 거리에 비례하여 증가시킵니다. 시간 공유에서는 항법 10% 배정을 기준으로 잡음 표준편차가 배정시간의 제곱근에 반비례한다고 가정합니다. 별도 신호 모드는 기준 잡음을 그대로 적용합니다.</p>
+      <p>LEO 총 거리오차에는 측정잡음·거리방향 궤도오차·위성별 잔여 시계오차를 제곱합으로 반영합니다. 모든 오차는 독립·영평균으로 가정합니다. GNSS와 지역항법 예시는 동일한 입력 거리오차를 사용합니다. 공통 궤도·시계 상관오차는 아직 포함하지 않습니다.</p>
+      <h3>통신 처리량</h3><p>자유공간 손실, EIRP, 수신 G/T, 대역폭, 입력한 강우감쇠와 고정 기타손실 2 dB로 C/N을 계산합니다. 3 dB 구현 손실을 둔 Shannon 근사에 6 bit/s/Hz 상한과 75% 효율을 적용한 단일 사용자 다운링크 추정값입니다.</p>
+      <p>시간 공유 시 항법 탑재 위성에서 배정시간만큼 통신 시간을 차감합니다. 각 시각에서 처리량이 가장 높은 가시 위성을 선택합니다. 주파수 공유 허용·실제 모뎀 변조부호화·핸드오버 단절·간섭·트래픽 분배·지상국·ISL은 별도 검증 대상입니다. 편도 전파지연에는 처리·라우팅·대기 지연이 없습니다.</p>
+      <h3>24시간 결과</h3><p>0분부터 1,435분까지 5분 간격 288개 표본을 사용합니다. ‘목표 충족률’은 이 표본에서 사용자가 지정한 통신·항법 조건을 충족하는 비율입니다. 짧은 중단, 고장, 기상 시간변화, 운용 가용도 또는 안전성 보증을 의미하지 않습니다.</p>
+      <h3>참고 근거</h3><ul class="source-list"><li><a href="https://gssc.esa.int/navipedia/index.php/Positioning_Error" target="_blank" rel="noopener noreferrer">ESA Navipedia — 위치오차와 공분산</a></li><li><a href="https://gssc.esa.int/navipedia/index.php/Transformations_between_ECEF_and_ENU_coordinates" target="_blank" rel="noopener noreferrer">ESA Navipedia — ECEF/ENU 좌표 변환</a></li><li><a href="https://arxiv.org/abs/2510.17324" target="_blank" rel="noopener noreferrer">통신·항법 혼합 파형 연구(2025)</a></li></ul><p>참고 연구의 성능 수치를 이 시뮬레이터의 기본값으로 사용하지 않았습니다. 기본 오차·링크 값은 사용자가 변경할 수 있는 설명용 가정입니다.</p>
+    </div>
+  </dialog>
+  <noscript><p class="error-box">이 시뮬레이터는 JavaScript를 켜야 실행됩니다.</p></noscript>
+</body>
+</html>

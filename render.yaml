@@ -1,0 +1,14 @@
+# Render Blueprint: deploy this repository as a Static Site.
+services:
+  - type: web
+    name: kleo-comm-nav
+    runtime: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate

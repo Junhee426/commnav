@@ -1,0 +1,13 @@
+{
+  "name": "kleo-comm-nav",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic K-LEO communications and navigation design simulator",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "build": "node scripts/verify-static.mjs && npm test",
+    "test": "node --test tests/engine.test.js",
+    "start": "python3 -m http.server 8000 --directory dist"
+  }
+}

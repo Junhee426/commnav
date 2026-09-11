@@ -1,0 +1,70 @@
+# K-LEO COMM / PNT — 통신·항법 통합 시뮬레이터
+
+브라우저에서 실행되는 통신·항법 설계 비교 도구입니다. 사용자에게 제시되는 수치는 설계모형의 조건부 예측값이며, 실제 KPS·K-LEO 성능 또는 안전성·무결성 보증을 의미하지 않습니다.
+
+## Render 배포
+
+전체 소스와 `render.yaml`을 GitHub 저장소에 올린 뒤 Render에서 Blueprint로 연결합니다. 또는 Static Site를 만들고 **Build Command: `npm run build`**, **Publish Directory: `dist`**로 설정합니다. [한국어 배포 안내](RENDER_DEPLOYMENT.md)에 단계별 설명과 설정표가 있습니다.
+
+설치할 의존 패키지가 없습니다. Node.js 24에서 `npm run build`를 실행하면 배포 파일·상대경로·JavaScript 문법과 수치모델 테스트를 검사합니다. `dist/`는 이미 실행 가능한 정적 소스이며, 이 명령은 출력물을 재생성하지 않습니다.
+
+## 첫 버전의 기능
+
+- **상황 화면:** 원궤도 Walker 위성군, 회전 가능한 지구, 관측지 하늘보기, 통신 접속·항법 가시 위성, 사용자 다운링크 처리량·편도 전파지연·도플러.
+- **성능 분석:** 24시간 5분 간격 분석, GNSS/LEO/가상 지역항법 구성 비교, 사용자 목표 동시 충족률, 항법 시간 배분 민감도.
+- **설정:** 500/888/1,280 km, 128/256/512기, 경사각, 한국·UAE·동남아 관측지, 항법 탑재 비율, 신호 분리/시간 공유, 측정·궤도·시계 오차, 통신 링크 변수.
+- **결과:** 모든 288개 표본과 실행 시점 설정을 CSV로 내보냅니다. 설정을 바꾸면 이전 24시간 결과에 명시적으로 ‘이전 설정’ 표시가 나타납니다.
+
+## 실행
+
+의존 패키지 설치 없이 정적 HTTP 서버로 실행합니다. 모듈 및 Web Worker를 사용하므로 HTML 파일을 file://로 직접 여는 대신 HTTP로 제공해야 합니다.
+
+```bash
+python3 -m http.server 8000 --directory dist
+```
+
+Node.js와 Python 3가 함께 설치되어 있으면 `npm start`도 같은 정적 서버를 실행합니다. Render는 `dist/`를 직접 제공하므로 Python과 시작 명령이 필요하지 않습니다. 실행 중 외부 API·외부 CDN·백엔드 계산 서버를 사용하지 않습니다.
+
+```bash
+node --test tests/engine.test.js
+```
+
+## 계산모델
+
+- 구형 지구 반경 6,378.137 km, 2체 원궤도, 지구 자전. 기준시각의 지구 회전각 0. 실제 TLE·GNSS 방송력 미사용.
+- LEO는 Walker Delta F=1, GNSS는 20,200 km / 55° / 6×4의 이상화 기준군.
+- 지역항법 옵션은 **공식 KPS 궤도가 아닌 가정**. GEO 경도 120/128/136°, IGSO 중심경도 128°·경사각 43°·5개 위상.
+- 가중 거리측정 공분산 `P=(HᵀR⁻¹H)⁻¹`. 각 항법망의 공통 시각차를 별도 상태로 추정. 수평 RMS=`sqrt(P_EE+P_NN)`이며 95% 위치오차와 구별.
+- LEO 측정잡음은 경사거리에 비례. 시간 공유에서는 항법 10%를 기준으로 배정 비율의 제곱근에 반비례. 궤도 및 잔여 시계오차는 독립 제곱합. 기본값은 실측값이 아닌 변경 가능한 가정.
+- GNSS와 지역항법 예시는 같은 거리오차 입력을 사용. 오차 상관, 다중경로, 시간상관 추정, 반송파 모호정수, 수신기 추적·포착은 미포함.
+- 통신은 자유공간 손실 + 고정 기타손실 2 dB + 사용자 강우손실, C/N 기반 Shannon 근사(3 dB 구현 손실, 6 bit/s/Hz 상한, 75% 효율).
+- 위성별 최선의 단일 사용자 링크 선택. 네트워크 총용량·실제 ACM·핸드오버 손실·큐잉·ISL·게이트웨이·주파수 간섭 미포함.
+- 별도 신호 모드는 통신 시간을 차감하지 않습니다. 탑재체 질량·전력·비용의 실제 데이터 기반 예산분석은 후속 범위입니다.
+- 5분 표본의 목표 충족 비율은 장기 서비스 가용도나 짧은 서비스 중단을 보장하지 않습니다. 위치오차 중앙값은 유효 표본만 사용하고 충족 비율은 무효 표본도 분모에 포함합니다.
+
+## 구성
+
+- `dist/engine.js`: 검증 가능한 독립 수치계산 모듈
+- `dist/analysis-worker.js`: 24시간 표본 계산
+- `dist/app.js`: 입력, 상태, 화면, CSV, 선택적 WebMCP 연결
+- `dist/rendering.js`: 실제 위치 벡터를 투영하는 지구·하늘보기·시간별 그래프
+- `dist/index.html`, `dist/styles.css`: 반응형 한국어 인터페이스
+- `tests/engine.test.js`: 독립 NumPy 결과와의 공분산 비교, 물리적 불변량·오류·퇴화조건 검증
+- `scripts/verify-static.mjs`: 배포 파일·상대경로·JavaScript 문법 검사
+- `render.yaml`: Render Static Site 배포 설정
+- `RENDER_DEPLOYMENT.md`: 한국어 배포 안내
+
+## 검증 범위
+
+수치모델 테스트 및 JavaScript 문법·정적 파일 참조 검사를 시행합니다. 브라우저 시각 QA는 이 요청의 범위에 포함되지 않았습니다. WebMCP는 지원되는 `document.modelContext`에서만 등록하며, 지원 컨텍스트의 실제 호출 검증은 이번 실행 환경에서 이용할 수 없었습니다. 일반 사용자 기능에는 WebMCP가 필요하지 않습니다.
+
+## 참고자료와 자산
+
+- [ESA Navipedia — Positioning Error](https://gssc.esa.int/navipedia/index.php/Positioning_Error)
+- [ESA Navipedia — ECEF/ENU](https://gssc.esa.int/navipedia/index.php/Transformations_between_ECEF_and_ENU_coordinates)
+- [When 5G NTN Meets GNSS (2025)](https://arxiv.org/abs/2510.17324): 확장 방향 참고. 이 연구의 성능 수치를 기본값으로 차용하지 않음.
+- 지구 영상은 사용자의 기존 Orbit Designer 프로젝트에 포함된 `earth_blue_marble_2048.jpg`를 재사용했습니다. 궤도·링크 등 모든 표시는 계산된 좌표를 사용합니다.
+
+## 다음 확장 지점
+
+공식 KPS 설계 궤도와 실제 GNSS 궤도력 입력, 항법 신호·수신기 오차모델, 도플러/반송파 시간연속 추정, 위성별 상관된 궤도·시계오차, 추가 탑재 자원 예산, 간섭·강우 시간변화, 사용자 트래픽과 핸드오버 모델을 순차적으로 연결할 수 있습니다.
