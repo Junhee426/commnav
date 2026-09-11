@@ -91,6 +91,13 @@ test('invalid requests and excessive constellations fail before calculations', (
   for(const patch of [{altitude:NaN},{clockNs:-1},{planes:32,satellitesPerPlane:32},{location:'unknown'},{regional:'true'},{privateKey:1}])assert.throws(()=>validateConfig({...cfg,...patch}));
 });
 
+test('location must be a string, even when an input coerces to a known location', () => {
+  for (const location of [['seoul'], new String('seoul'), { toString: () => 'seoul' }, null]) {
+    assert.throws(() => validateConfig({ ...cfg, location }), /관측지/);
+  }
+  assert.equal(validateConfig({ ...cfg, location: 'seoul' }).location, 'seoul');
+});
+
 test('24-hour summary counts unavailable samples and excludes them only from conditional medians', () => {
   const samples=[{minutes:0,rate:200,hrms:2,baseline:4,gnssLEO:2,navPass:true,commPass:true,jointPass:true,leoVisible:4},{minutes:5,rate:0,hrms:null,baseline:null,gnssLEO:null,navPass:false,commPass:false,jointPass:false,leoVisible:0}];
   const sum=summarize(samples,cfg);close(sum.jointAvailability,50);close(sum.medianHrms,2);close(sum.validNavAvailability,50);assert.equal(sum.minLEO,0);

@@ -42,7 +42,7 @@ export function validateConfig(input) {
   if (!Number.isInteger(cfg.planes) || !Number.isInteger(cfg.satellitesPerPlane)) throw new Error('궤도면·위성 수는 정수여야 합니다.');
   if (cfg.planes * cfg.satellitesPerPlane > 512) throw new Error('첫 버전은 LEO 512기까지 계산합니다.');
   for (const key of ['leoNav', 'regional']) if (typeof cfg[key] !== 'boolean') throw new Error(key + ' 값을 확인해 주세요.');
-  if (!Object.hasOwn(LOCATIONS, cfg.location)) throw new Error('관측지를 선택해 주세요.');
+  if (typeof cfg.location !== 'string' || !Object.hasOwn(LOCATIONS, cfg.location)) throw new Error('관측지를 선택해 주세요.');
   if (!['separate', 'time'].includes(cfg.sharing)) throw new Error('신호 공유 방식을 선택해 주세요.');
   return cfg;
 }

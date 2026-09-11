@@ -26,7 +26,7 @@ python3 -m http.server 8000 --directory dist
 Node.js와 Python 3가 함께 설치되어 있으면 `npm start`도 같은 정적 서버를 실행합니다. Render는 `dist/`를 직접 제공하므로 Python과 시작 명령이 필요하지 않습니다. 실행 중 외부 API·외부 CDN·백엔드 계산 서버를 사용하지 않습니다.
 
 ```bash
-node --test tests/engine.test.js
+npm test
 ```
 
 ## 계산모델
@@ -50,6 +50,7 @@ node --test tests/engine.test.js
 - `dist/rendering.js`: 실제 위치 벡터를 투영하는 지구·하늘보기·시간별 그래프
 - `dist/index.html`, `dist/styles.css`: 반응형 한국어 인터페이스
 - `tests/engine.test.js`: 독립 NumPy 결과와의 공분산 비교, 물리적 불변량·오류·퇴화조건 검증
+- `tests/app.test.js`: DOM·Worker 대역을 이용한 분석 재실행, 중복 제출, 입력 오류, 실패 후 재시도 검증
 - `scripts/verify-static.mjs`: 배포 파일·상대경로·JavaScript 문법 검사
 - `render.yaml`: Render Static Site 배포 설정
 - `RENDER_DEPLOYMENT.md`: 한국어 배포 안내

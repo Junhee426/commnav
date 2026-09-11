@@ -89,7 +89,11 @@ form.addEventListener('input', () => {
   clearTimeout(scheduled);
   scheduled = setTimeout(() => { try { acceptConfig(readConfig()); } catch (error) { reportError(error.message); } }, 90);
 });
-form.addEventListener('submit', event => { event.preventDefault(); runAnalysis(true).catch(() => {}); });
+form.addEventListener('submit', event => {
+  event.preventDefault();
+  if (calculating) return;
+  runAnalysis(true).catch(() => {}); // Validation and worker errors are displayed by runAnalysis.
+});
 
 function setView(next) {
   if (!['situation', 'analysis'].includes(next)) throw new Error('화면을 선택해 주세요.');

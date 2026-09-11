@@ -7,7 +7,7 @@
   "engines": { "node": ">=24 <25" },
   "scripts": {
     "build": "node scripts/verify-static.mjs && npm test",
-    "test": "node --test tests/engine.test.js",
+    "test": "node --test tests/*.test.js",
     "start": "python3 -m http.server 8000 --directory dist"
   }
 }
