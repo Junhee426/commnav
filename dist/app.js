@@ -7,6 +7,8 @@ let config = { ...DEFAULT_CONFIG }, minutes = 0, view = 'situation';
 let orbits = buildConstellations(config), current = null;
 let lastAnalysis = null, worker = null, job = 0, playing = null, calculating = false;
 let scheduled = null, analysisResolve = null, analysisReject = null;
+let sweepCache = null;
+const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'leoNav', 'payloadPercent', 'regional'];
 const globe = new Globe($('globe'));
 const fields = [...form.querySelectorAll('[data-config]')];
 const mobileMedia = window.matchMedia('(max-width: 620px)');
@@ -75,7 +77,11 @@ function drawSnapshot() {
   if (view === 'analysis') renderSweep();
 }
 function acceptConfig(next) {
-  const oldLocation = config.location; config = next; orbits = buildConstellations(config);
+  clearError();
+  if (Object.keys(config).every(key => config[key] === next[key])) return;
+  const oldLocation = config.location;
+  if (orbitKeys.some(key => config[key] !== next[key])) orbits = buildConstellations(next);
+  config = next;
   updateControlLabels(); clearError(); drawSnapshot(); updateAnalysisNotice();
   if (oldLocation !== config.location) globe.center(LOCATIONS[config.location].lat, LOCATIONS[config.location].lon);
 }
@@ -124,6 +130,7 @@ function finishCalculation(error) {
   if (error) { reportError(error); text('run-status', '계산을 완료하지 못했습니다.'); analysisReject?.(new Error(error)); }
   else { text('run-status', '완료 · 5분 간격 / 288개 표본'); analysisResolve?.(lastAnalysis); }
   analysisResolve = analysisReject = null;
+  updateAnalysisNotice();
 }
 function runAnalysis(navigate = false) {
   try { clearTimeout(scheduled); acceptConfig(readConfig()); } catch (error) { reportError(error.message); return Promise.reject(error); }
@@ -172,8 +179,14 @@ function renderAnalysis() {
 }
 function renderSweep() {
   if (view !== 'analysis') return;
-  const points = resourceSweep(config, minutes);
-  text('sweep-context', 'T + ' + clock(minutes) + ' · 현재 입력값');
+  // These controls do not affect a sweep that already varies navShare in time-sharing mode.
+  const { sharing, navShare, horizontalTarget, rateTarget, ...sweepConfig } = config;
+  const key = JSON.stringify([sweepConfig, minutes]);
+  if (sweepCache?.key !== key) sweepCache = { key, points: resourceSweep(config, minutes) };
+  drawSweep(sweepCache.points);
+}
+function drawSweep(points) {
+  text('sweep-context', 'T + ' + clock(minutes) + ' · 현재 입력값 · 시간 공유 가정');
   lineChart($('resource-rate-chart'), points, [{ key: 'rate', color: '#f6b75b' }], { xMax: 40, xKey: 'navShare', xLabel: '항법 배정시간 (%)', yLabel: '처리량 (Mbps)', title: '항법 배정시간에 따른 통신 처리량' });
   lineChart($('resource-nav-chart'), points, [{ key: 'hrms', color: '#48d4f0' }], { xMax: 40, xKey: 'navShare', xLabel: '항법 배정시간 (%)', yLabel: '수평 RMS (m)', title: '항법 배정시간에 따른 위치오차' });
 }

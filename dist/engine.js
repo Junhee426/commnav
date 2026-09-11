@@ -157,23 +157,34 @@ export function linkBudget(sat, config) {
 }
 export function snapshot(config, minutes = 0, constellation) {
   const cfg = validateConfig(config);
+  return evaluateSnapshot(cfg, prepareGeometry(cfg, minutes, constellation));
+}
+// Orbit propagation and observer geometry do not depend on navigation time allocation.
+function prepareGeometry(cfg, minutes, constellation) {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440) throw new Error('시각은 0–1440분 범위입니다.');
   const satList = constellation || buildConstellations(cfg), location = LOCATIONS[cfg.location];
   const frame = observerFrame(location.lat, location.lon);
+  const satellites = satList.map(orbit => {
+    const state = orbitState(orbit, minutes * 60);
+    return { id: orbit.id, group: orbit.group, payload: orbit.payload, position: state.position, ...observe(state, frame) };
+  });
+  return { minutes, location, observer: frame.position, satellites };
+}
+function evaluateSnapshot(cfg, geometry) {
+  const { minutes, location, observer } = geometry;
   const measurements = [], gnss = [], regional = [], leo = [], states = [];
   let best = null;
   let commVisible = 0, navVisibleLEO = 0, payloadCount = 0;
-  for (const orbit of satList) {
-    if (orbit.group === 'LEO' && orbit.payload) payloadCount++;
-    const state = orbitState(orbit, minutes * 60), seen = observe(state, frame);
-    const sat = { id: orbit.id, group: orbit.group, payload: orbit.payload, position: state.position, ...seen, sigma: null, navUsed: false };
-    if (orbit.group === 'LEO' && seen.elevation >= cfg.commElevation) {
+  for (const seen of geometry.satellites) {
+    if (seen.group === 'LEO' && seen.payload) payloadCount++;
+    const sat = { ...seen, sigma: null, navUsed: false };
+    if (sat.group === 'LEO' && seen.elevation >= cfg.commElevation) {
       commVisible++;
       sat.link = linkBudget(sat, cfg);
       if (!best || sat.link.mbps > best.link.mbps) best = sat;
     }
-    if (seen.elevation >= cfg.navElevation && orbit.payload) {
-      if (orbit.group === 'LEO') {
+    if (seen.elevation >= cfg.navElevation && sat.payload) {
+      if (sat.group === 'LEO') {
         const fraction = cfg.sharing === 'time' ? cfg.navShare / 100 : 0.1;
         if (fraction > 0) {
           const noise = cfg.leoSigma * seen.range / 1000 * Math.sqrt(0.1 / fraction);
@@ -198,7 +209,7 @@ export function snapshot(config, minutes = 0, constellation) {
   const rate = best ? best.link.mbps : 0;
   const navPass = fusion.valid && fusion.hrms <= cfg.horizontalTarget;
   const commPass = rate >= cfg.rateTarget;
-  return { minutes, satellites: states, observer: frame.position, location, best,
+  return { minutes, satellites: states, observer, location, best,
     baseline, gnssLEO, fusion, rate, commVisible, navVisibleLEO, gnssVisible: gnss.length,
     regionalVisible: regional.length, payloadCount, navPass, commPass, jointPass: navPass && commPass };
 }
@@ -227,9 +238,9 @@ export function summarize(samples, config) {
 }
 export function resourceSweep(config, minutes) {
   const cfg = { ...validateConfig(config), sharing: 'time' };
-  const constellations = buildConstellations(cfg);
+  const geometry = prepareGeometry(cfg, minutes);
   return Array.from({ length: 21 }, (_, i) => {
-    const s = snapshot({ ...cfg, navShare: i * 2 }, minutes, constellations);
+    const s = evaluateSnapshot({ ...cfg, navShare: i * 2 }, geometry);
     return { navShare: i * 2, rate: s.rate, hrms: s.fusion.hrms };
   });
 }
