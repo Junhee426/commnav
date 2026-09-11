@@ -1,5 +1,5 @@
 // K-LEO COMM/PNT: deterministic circular-orbit design model, not operational ephemerides.
-export const MODEL_VERSION = '1.0.0';
+export const MODEL_VERSION = '1.1.0';
 export const EARTH_RADIUS = 6378.137; // km; spherical Earth approximation
 export const MU = 398600.4418; // km^3/s^2
 export const EARTH_RATE = 7.292115e-5; // rad/s
@@ -16,7 +16,7 @@ export const LOCATIONS = {
 };
 export const DEFAULT_CONFIG = Object.freeze({
   altitude: 888, inclination: 42, planes: 16, satellitesPerPlane: 16,
-  location: 'seoul', commElevation: 20, navElevation: 10,
+  location: 'seoul', latitude: 37.5665, longitude: 126.978, commElevation: 20, navElevation: 10,
   leoNav: true, payloadPercent: 100, regional: false,
   sharing: 'separate', navShare: 10,
   gnssSigma: 3, leoSigma: 1.5, orbitSigma: 1, clockNs: 3,
@@ -30,6 +30,7 @@ export function validateConfig(input) {
   const cfg = { ...DEFAULT_CONFIG, ...input };
   const limits = {
     altitude: [400, 2000], inclination: [0, 90], planes: [1, 32], satellitesPerPlane: [4, 32],
+    latitude: [-90, 90], longitude: [-180, 180],
     commElevation: [5, 60], navElevation: [5, 60], payloadPercent: [0, 100], navShare: [0, 40],
     gnssSigma: [0.1, 30], leoSigma: [0.1, 30], orbitSigma: [0, 30], clockNs: [0, 1000],
     eirp: [20, 65], gt: [-10, 30], bandwidth: [1, 500], frequency: [10, 40], rainLoss: [0, 40],
@@ -40,11 +41,16 @@ export function validateConfig(input) {
       throw new Error(key + ': ' + lo + '–' + hi + ' 범위의 수치를 입력해 주세요.');
   }
   if (!Number.isInteger(cfg.planes) || !Number.isInteger(cfg.satellitesPerPlane)) throw new Error('궤도면·위성 수는 정수여야 합니다.');
-  if (cfg.planes * cfg.satellitesPerPlane > 512) throw new Error('첫 버전은 LEO 512기까지 계산합니다.');
+  if (cfg.planes * cfg.satellitesPerPlane > 512) throw new Error('LEO 위성은 총 512기까지 계산합니다. 궤도면 수 또는 면당 위성 수를 줄여 주세요.');
   for (const key of ['leoNav', 'regional']) if (typeof cfg[key] !== 'boolean') throw new Error(key + ' 값을 확인해 주세요.');
-  if (typeof cfg.location !== 'string' || !Object.hasOwn(LOCATIONS, cfg.location)) throw new Error('관측지를 선택해 주세요.');
+  if (typeof cfg.location !== 'string' || (cfg.location !== 'custom' && !Object.hasOwn(LOCATIONS, cfg.location))) throw new Error('관측지를 선택해 주세요.');
   if (!['separate', 'time'].includes(cfg.sharing)) throw new Error('신호 공유 방식을 선택해 주세요.');
   return cfg;
+}
+export function getLocation(config) {
+  return config.location === 'custom'
+    ? { name: '사용자 지정', lat: config.latitude, lon: config.longitude }
+    : LOCATIONS[config.location];
 }
 function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 function norm(a) { return Math.sqrt(dot(a, a)); }
@@ -162,7 +168,7 @@ export function snapshot(config, minutes = 0, constellation) {
 // Orbit propagation and observer geometry do not depend on navigation time allocation.
 function prepareGeometry(cfg, minutes, constellation) {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440) throw new Error('시각은 0–1440분 범위입니다.');
-  const satList = constellation || buildConstellations(cfg), location = LOCATIONS[cfg.location];
+  const satList = constellation || buildConstellations(cfg), location = getLocation(cfg);
   const frame = observerFrame(location.lat, location.lon);
   const satellites = satList.map(orbit => {
     const state = orbitState(orbit, minutes * 60);

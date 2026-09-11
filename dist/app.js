@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, LOCATIONS, validateConfig, buildConstellations, snapshot, resourceSweep, MODEL_VERSION } from './engine.js';
+import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, resourceSweep, MODEL_VERSION } from './engine.js';
 import { Globe, skyPlot, lineChart } from './rendering.js';
 
 const $ = id => document.getElementById(id);
@@ -31,14 +31,21 @@ function readConfig() {
 function reportError(message) { text('config-error', message); $('config-error').hidden = false; }
 function clearError() { $('config-error').hidden = true; }
 function stale() { return !lastAnalysis || JSON.stringify(lastAnalysis.config) !== JSON.stringify(config); }
+function locationLabel(used) {
+  const location = getLocation(used);
+  return used.location === 'custom' ? `${location.name} (${location.lat}°, ${location.lon}°)` : location.name;
+}
 function updateAnalysisNotice() {
   const note = $('analysis-note');
   note.classList.toggle('stale', !!lastAnalysis && stale());
   if (lastAnalysis && stale()) note.textContent = '설정이 변경되었습니다. 아래 시간별 결과는 이전 설정입니다. ‘24시간 비교 분석’을 다시 실행해 주세요.';
-  else if (lastAnalysis) note.textContent = `${LOCATIONS[lastAnalysis.config.location].name} · 24시간 / 5분 간격 / 288개 표본 · 원궤도 설계모형`;
+  else if (lastAnalysis) note.textContent = `${locationLabel(lastAnalysis.config)} · 24시간 / 5분 간격 / 288개 표본 · 원궤도 설계모형`;
   else note.textContent = calculating ? '기본 시나리오의 24시간 성능을 계산하고 있습니다.' : '왼쪽 설정에서 24시간 비교 분석을 실행해 주세요.';
 }
 function updateControlLabels() {
+  $('custom-location').hidden = config.location !== 'custom';
+  form.elements.latitude.disabled = form.elements.longitude.disabled = config.location !== 'custom';
+  text('constellation-note', `${config.planes}면 × 면당 ${config.satellitesPerPlane}기 = 총 ${config.planes * config.satellitesPerPlane}기 · Walker Delta F=1`);
   text('payload-value', config.payloadPercent + '%'); text('share-value', config.navShare + '%');
   const share = form.elements.navShare;
   share.disabled = config.sharing === 'separate' || !config.leoNav || config.payloadPercent === 0;
@@ -79,11 +86,12 @@ function drawSnapshot() {
 function acceptConfig(next) {
   clearError();
   if (Object.keys(config).every(key => config[key] === next[key])) return;
-  const oldLocation = config.location;
+  const oldLocation = getLocation(config);
   if (orbitKeys.some(key => config[key] !== next[key])) orbits = buildConstellations(next);
   config = next;
   updateControlLabels(); clearError(); drawSnapshot(); updateAnalysisNotice();
-  if (oldLocation !== config.location) globe.center(LOCATIONS[config.location].lat, LOCATIONS[config.location].lon);
+  const location = getLocation(config);
+  if (oldLocation.lat !== location.lat || oldLocation.lon !== location.lon) globe.center(location.lat, location.lon);
 }
 form.addEventListener('input', () => {
   clearTimeout(scheduled);
@@ -179,7 +187,7 @@ function renderAnalysis() {
     fragment.append(tr);
   }
   $('comparison-rows').replaceChildren(fragment);
-  text('comparison-context', LOCATIONS[used.location].name + ' · 동일 시간 표본');
+  text('comparison-context', locationLabel(used) + ' · 동일 시간 표본');
 }
 function renderSweep() {
   if (view !== 'analysis') return;
