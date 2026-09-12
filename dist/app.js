@@ -1,16 +1,43 @@
-import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, resourceSweep, MODEL_VERSION } from './engine.js';
+import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, resourceSweep, parameterSweep, MODEL_VERSION } from './engine.js';
 import { Globe, skyPlot, lineChart } from './rendering.js';
 
 const $ = id => document.getElementById(id);
 const form = $('configuration');
-let config = { ...DEFAULT_CONFIG }, minutes = 0, view = 'situation';
+function configFromHash() {
+  const match = /(?:^|#)cfg=([^&]+)/.exec(location.hash);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(match[1]));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return validateConfig({ ...DEFAULT_CONFIG, ...parsed });
+  } catch { return null; }
+}
+let config = configFromHash() || { ...DEFAULT_CONFIG }, minutes = 0, view = 'situation';
 let orbits = buildConstellations(config), current = null;
 let lastAnalysis = null, worker = null, job = 0, playing = null, calculating = false;
 let scheduled = null, analysisResolve = null, analysisReject = null;
-let sweepCache = null;
+let sweepCache = null, sweepAxis = 'navShare';
+const SWEEP_AXIS_META = {
+  navShare: { max: 40, label: '항법 배정시간 (%)', intro: '현재 입력값을 유지하고 항법 시간을 0–40%로 변경한 비교입니다. 신호 분리 모드에서도 시간 공유 전환 시의 변화를 보여줍니다.' },
+  altitude: { max: 2000, label: '궤도 고도 (km)', intro: '현재 입력값을 유지하고 궤도 고도를 400–2,000 km로 변경한 비교입니다.' },
+  inclination: { max: 90, label: '궤도 경사각 (°)', intro: '현재 입력값을 유지하고 궤도 경사각을 0–90°로 변경한 비교입니다.' },
+  planes: { max: 32, label: '궤도면 수', intro: '현재 입력값을 유지하고 궤도면 수를 1–32개로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
+  satellitesPerPlane: { max: 32, label: '면당 위성 수', intro: '현재 입력값을 유지하고 면당 위성 수를 4–32기로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
+  payloadPercent: { max: 100, label: '항법 탑재 비율 (%)', intro: '현재 입력값을 유지하고 항법 탑재 위성 비율을 0–100%로 변경한 비교입니다.' },
+};
 const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'leoNav', 'payloadPercent', 'regional'];
 const globe = new Globe($('globe'));
 const fields = [...form.querySelectorAll('[data-config]')];
+function syncFieldsToConfig(cfg) {
+  for (const field of fields) { const key = field.dataset.config; if (field.type === 'checkbox') field.checked = cfg[key]; else field.value = String(cfg[key]); }
+}
+function shareUrl(cfg) {
+  const diff = {};
+  for (const key of Object.keys(DEFAULT_CONFIG)) if (cfg[key] !== DEFAULT_CONFIG[key]) diff[key] = cfg[key];
+  const url = new URL(location.href);
+  url.hash = Object.keys(diff).length ? 'cfg=' + encodeURIComponent(JSON.stringify(diff)) : '';
+  return url.toString();
+}
 const mobileMedia = window.matchMedia('(max-width: 620px)');
 const sidebar = document.querySelector('.sidebar');
 const display = (v, decimals = 1) => Number.isFinite(v) ? v.toLocaleString('ko-KR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : '—';
@@ -191,17 +218,20 @@ function renderAnalysis() {
 }
 function renderSweep() {
   if (view !== 'analysis') return;
-  // These controls do not affect a sweep that already varies navShare in time-sharing mode.
-  const { sharing, navShare, horizontalTarget, rateTarget, ...sweepConfig } = config;
-  const key = JSON.stringify([sweepConfig, minutes]);
-  if (sweepCache?.key !== key) sweepCache = { key, points: resourceSweep(config, minutes) };
+  // The swept axis itself must not be pinned into the cache key, or every point would collapse to one key.
+  const { sharing, navShare, horizontalTarget, rateTarget, [sweepAxis]: swept, ...sweepConfig } = config;
+  const key = JSON.stringify([sweepConfig, minutes, sweepAxis]);
+  if (sweepCache?.key !== key) sweepCache = { key, points: parameterSweep(config, minutes, sweepAxis) };
   drawSweep(sweepCache.points);
 }
 function drawSweep(points) {
-  text('sweep-context', 'T + ' + clock(minutes) + ' · 현재 입력값 · 시간 공유 가정');
-  lineChart($('resource-rate-chart'), points, [{ key: 'rate', color: '#f6b75b' }], { xMax: 40, xKey: 'navShare', xLabel: '항법 배정시간 (%)', yLabel: '처리량 (Mbps)', title: '항법 배정시간에 따른 통신 처리량' });
-  lineChart($('resource-nav-chart'), points, [{ key: 'hrms', color: '#48d4f0' }], { xMax: 40, xKey: 'navShare', xLabel: '항법 배정시간 (%)', yLabel: '수평 RMS (m)', title: '항법 배정시간에 따른 위치오차' });
+  const meta = SWEEP_AXIS_META[sweepAxis];
+  text('sweep-context', 'T + ' + clock(minutes) + ' · 현재 입력값 기준');
+  text('sweep-intro', meta.intro);
+  lineChart($('resource-rate-chart'), points, [{ key: 'rate', color: '#f6b75b' }], { xMax: meta.max, xKey: sweepAxis, xLabel: meta.label, yLabel: '처리량 (Mbps)', title: meta.label + '에 따른 통신 처리량' });
+  lineChart($('resource-nav-chart'), points, [{ key: 'hrms', color: '#48d4f0' }], { xMax: meta.max, xKey: sweepAxis, xLabel: meta.label, yLabel: '수평 RMS (m)', title: meta.label + '에 따른 위치오차' });
 }
+$('sweep-axis').addEventListener('change', () => { sweepAxis = $('sweep-axis').value; renderSweep(); });
 let resizeTimer;
 new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (view === 'analysis') { renderAnalysis(); renderSweep(); } }, 120); }).observe($('workspace'));
 
@@ -249,7 +279,7 @@ function configureFromTool(input) {
   }
   const validated = validateConfig({ ...config, ...input.settings });
   clearTimeout(scheduled);
-  for (const field of fields) { if (field.type === 'checkbox') field.checked = validated[field.dataset.config]; else field.value = validated[field.dataset.config]; }
+  syncFieldsToConfig(validated);
   acceptConfig(validated); return toolSummary();
 }
 function registerModelTools() {
@@ -278,6 +308,17 @@ function registerModelTools() {
     try { Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch {}
   }
 }
+syncFieldsToConfig(config);
+$('share-config').addEventListener('click', async () => {
+  const url = shareUrl(config);
+  history.replaceState(null, '', url);
+  try {
+    await navigator.clipboard.writeText(url);
+    text('share-status', '현재 설정의 링크를 복사했습니다.');
+  } catch {
+    text('share-status', '클립보드 복사에 실패했습니다. 주소창의 링크를 사용해 주세요.');
+  }
+});
 updateControlLabels(); drawSnapshot(); globe.center(current.location.lat, current.location.lon);
 setView('situation'); registerModelTools();
 runAnalysis(false).catch(() => {});

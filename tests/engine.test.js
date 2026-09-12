@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_CONFIG, EARTH_RADIUS, LOCATIONS, validateConfig, buildConstellations, orbitState, observerFrame, observe, snapshot, positionAccuracy, linkBudget, compactSample, summarize, resourceSweep } from '../dist/engine.js';
+import { DEFAULT_CONFIG, EARTH_RADIUS, LOCATIONS, validateConfig, buildConstellations, orbitState, observerFrame, observe, snapshot, positionAccuracy, linkBudget, compactSample, summarize, resourceSweep, parameterSweep, SWEEP_AXES } from '../dist/engine.js';
 
 const close = (actual, expected, tolerance = 1e-8) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} != ${expected}`);
 const norm = a => Math.hypot(...a);
@@ -153,4 +153,36 @@ test('all regional presets and a full day produce finite rates and consistent co
   const summary=summarize(samples,cfg);
   assert.equal(summary.samples,288);assert.equal(samples.at(-1).minutes,1435);
   for(const key of ['commAvailability','navAvailability','jointAvailability'])assert.ok(summary[key]>=0&&summary[key]<=100);
+});
+
+test('parameterSweep on navShare reproduces resourceSweep exactly', () => {
+  assert.deepEqual(parameterSweep(cfg, 0, 'navShare'), resourceSweep(cfg, 0).map(p => ({ ...p, unavailable: false })));
+});
+
+test('parameterSweep rejects an unsupported axis', () => {
+  assert.throws(() => parameterSweep(cfg, 0, 'notAnAxis'));
+});
+
+test('altitude sweep covers the full validated range and stays available throughout', () => {
+  const points = parameterSweep(cfg, 0, 'altitude');
+  assert.equal(points[0].altitude, 400);
+  assert.equal(points.at(-1).altitude, 2000);
+  assert.ok(points.every(p => !p.unavailable && Number.isFinite(p.rate) && Number.isFinite(p.hrms)));
+});
+
+test('planes sweep marks combinations exceeding the 512-satellite cap as unavailable, not a crash', () => {
+  const points = parameterSweep({ ...cfg, satellitesPerPlane: 32 }, 0, 'planes');
+  const overCap = points.filter(p => p.planes * 32 > 512);
+  const underCap = points.filter(p => p.planes * 32 <= 512);
+  assert.ok(overCap.length > 0 && underCap.length > 0);
+  assert.ok(overCap.every(p => p.unavailable && p.rate === null));
+  assert.ok(underCap.every(p => !p.unavailable));
+});
+
+test('every advertised sweep axis runs end to end', () => {
+  for (const axis of SWEEP_AXES) {
+    const points = parameterSweep(cfg, 0, axis);
+    assert.ok(points.length > 1);
+    assert.ok(points.some(p => !p.unavailable));
+  }
 });

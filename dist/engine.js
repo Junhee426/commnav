@@ -243,10 +243,43 @@ export function summarize(samples, config) {
     minLEO: Math.min(...samples.map(s => s.leoVisible)), maxLEO: Math.max(...samples.map(s => s.leoVisible)) };
 }
 export function resourceSweep(config, minutes) {
-  const cfg = { ...validateConfig(config), sharing: 'time' };
-  const geometry = prepareGeometry(cfg, minutes);
-  return Array.from({ length: 21 }, (_, i) => {
-    const s = evaluateSnapshot({ ...cfg, navShare: i * 2 }, geometry);
-    return { navShare: i * 2, rate: s.rate, hrms: s.fusion.hrms };
+  return parameterSweep(config, minutes, 'navShare');
+}
+// Ranges mirror validateConfig's own limits for each field.
+const SWEEP_SPECS = {
+  navShare: { min: 0, max: 40, steps: 21 },
+  altitude: { min: 400, max: 2000, steps: 17 },
+  inclination: { min: 0, max: 90, steps: 19 },
+  planes: { min: 1, max: 32, steps: 32, integer: true },
+  satellitesPerPlane: { min: 4, max: 32, steps: 15, integer: true },
+  payloadPercent: { min: 0, max: 100, steps: 21 },
+};
+export const SWEEP_AXES = Object.keys(SWEEP_SPECS);
+function sweepAxisPoints({ min, max, steps, integer }) {
+  return Array.from({ length: steps }, (_, i) => {
+    const raw = min + (max - min) * i / (steps - 1);
+    return integer ? Math.round(raw) : Math.round(raw * 100) / 100;
+  });
+}
+// Sweeps a single design variable across its full valid range, holding everything
+// else fixed, so a trade study can compare e.g. altitude or plane count rather
+// than only the original navigation-time-share axis. Points whose combination
+// happens to be infeasible (e.g. planes × satellitesPerPlane > 512) are marked
+// unavailable instead of aborting the whole sweep.
+export function parameterSweep(config, minutes, axis = 'navShare') {
+  const spec = SWEEP_SPECS[axis];
+  if (!spec) throw new Error('지원하지 않는 스윕 변수: ' + axis);
+  const base = axis === 'navShare' ? { ...validateConfig(config), sharing: 'time' } : validateConfig(config);
+  // navShare alone doesn't change satellite geometry, so it can reuse one prepared geometry.
+  const sharedGeometry = axis === 'navShare' ? prepareGeometry(base, minutes) : null;
+  return sweepAxisPoints(spec).map(value => {
+    try {
+      const cfg = validateConfig({ ...base, [axis]: value });
+      const geometry = sharedGeometry || prepareGeometry(cfg, minutes);
+      const s = evaluateSnapshot(cfg, geometry);
+      return { [axis]: value, rate: s.rate, hrms: s.fusion.hrms, unavailable: false };
+    } catch {
+      return { [axis]: value, rate: null, hrms: null, unavailable: true };
+    }
   });
 }
