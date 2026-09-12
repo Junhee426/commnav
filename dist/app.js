@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, resourceSweep, parameterSweep, MODEL_VERSION } from './engine.js';
+import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, MODEL_VERSION } from './engine.js';
 import { Globe, skyPlot, lineChart } from './rendering.js';
 
 const $ = id => document.getElementById(id);
@@ -292,7 +292,13 @@ function registerModelTools() {
     const key = field.dataset.config;
     if (field.type === 'checkbox') properties[key] = { type: 'boolean' };
     else if (field.tagName === 'SELECT') properties[key] = { type: ['location', 'sharing'].includes(key) ? 'string' : 'number', enum: [...field.options].map(o => ['location', 'sharing'].includes(key) ? o.value : Number(o.value)) };
-    else properties[key] = { type: 'number', minimum: Number(field.min), maximum: Number(field.max) };
+    else {
+      properties[key] = { type: 'number', minimum: Number(field.min), maximum: Number(field.max) };
+      // Range inputs (min="0" here) are only accepted at exact step multiples by
+      // configureFromTool below; advertise that so a caller building a request straight from
+      // this schema doesn't pick an in-range value the runtime check then rejects.
+      if (field.type === 'range' && Number(field.step)) properties[key].multipleOf = Number(field.step);
+    }
   }
   const tools = [
     { name: 'get_comm_nav_state', title: '통신·항법 상태 읽기', description: '현재 설정, 현재시각의 예측값과 마지막 24시간 분석 요약을 읽습니다. stale은 이전 설정의 결과임을 나타냅니다.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, untrustedContentHint: false }, execute: input => { if (!input || Object.keys(input).length) throw new Error('입력 항목이 없습니다.'); return toolSummary(); } },
