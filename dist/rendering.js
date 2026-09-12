@@ -51,8 +51,10 @@ export class Globe {
       const ex = (x + .5 - r) / r, ny = -(y + .5 - r) / r, dist = ex * ex + ny * ny;
       if (dist > 1) continue;
       const uz = Math.sqrt(1 - dist), index = (y * size + x) * 4;
-      const world = frame.east.map((v, i) => v * ex + frame.north[i] * ny + frame.up[i] * uz);
-      const lon = Math.atan2(world[1], world[0]), lat = Math.asin(Math.max(-1, Math.min(1, world[2])));
+      const worldX = frame.east[0] * ex + frame.north[0] * ny + frame.up[0] * uz;
+      const worldY = frame.east[1] * ex + frame.north[1] * ny + frame.up[1] * uz;
+      const worldZ = frame.east[2] * ex + frame.north[2] * ny + frame.up[2] * uz;
+      const lon = Math.atan2(worldY, worldX), lat = Math.asin(Math.max(-1, Math.min(1, worldZ)));
       const light = .42 + .58 * uz;
       if (tex) {
         const tx = Math.min(tex.width - 1, Math.floor((lon / TWO_PI + .5) * tex.width));
@@ -86,7 +88,7 @@ export class Globe {
       ctx.strokeStyle = o.group === 'LEO' ? 'rgba(72,212,240,.20)' : o.group === 'GNSS' ? 'rgba(246,183,91,.25)' : 'rgba(193,160,255,.26)';
       ctx.beginPath(); let prior = false;
       for (let i = 0; i <= 120; i++) {
-        const q = project(orbitState({ ...o, phase: TWO_PI * i / 120 }, this.snapshot.minutes * 60).position);
+        const q = project(orbitState(o, this.snapshot.minutes * 60, TWO_PI * i / 120).position);
         const show = unoccluded(q);
         if (show && prior) ctx.lineTo(q.x, q.y); else if (show) ctx.moveTo(q.x, q.y);
         prior = show;
