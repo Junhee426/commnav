@@ -101,7 +101,7 @@ export class Globe {
     const obs = project(this.snapshot.observer);
     if (obs.z >= 0) {
       for (const sat of this.snapshot.satellites) {
-        if (sat.group !== 'LEO' || !sat.navUsed || (!this.full && sat.group !== 'LEO')) continue;
+        if (sat.group !== 'LEO' || !sat.navUsed) continue;
         const q = project(sat.position); if (!unoccluded(q)) continue;
         ctx.strokeStyle = 'rgba(72,212,240,.45)'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(obs.x, obs.y); ctx.lineTo(q.x, q.y); ctx.stroke();
