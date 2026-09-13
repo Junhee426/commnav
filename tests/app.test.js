@@ -31,7 +31,7 @@ class Element extends EventTarget {
   insertBefore() {}
 }
 
-function startApp() {
+function startApp(options = {}) {
   const elements = new Map();
   const get = id => {
     if (!elements.has(id)) elements.set(id, new Element());
@@ -62,9 +62,25 @@ function startApp() {
     createElement: () => new Element(), createTextNode: text => text,
     createDocumentFragment: () => new Element(),
   });
+  const location = { href: options.href || 'https://example.test/comm-nav', hash: options.hash || '' };
+  const historyCalls = [];
+  const history = {
+    replaceState: (state, title, url) => {
+      historyCalls.push(url);
+      location.href = url;
+      location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : '';
+    },
+  };
+  const clipboard = { text: null, fail: options.clipboardFails || false };
+  const navigator = {
+    clipboard: {
+      writeText: text => clipboard.fail ? Promise.reject(new Error('denied')) : (clipboard.text = text, Promise.resolve()),
+    },
+  };
   runInNewContext(source, {
     ...engine, document,
     window: { matchMedia: () => ({ matches: false }) },
+    location, history, navigator,
     Globe: class { set() {} center(lat, lon) { centers.push([lat, lon]); } draw() {} },
     skyPlot() {}, lineChart() {},
     ResizeObserver: class { observe() {} },
@@ -75,7 +91,8 @@ function startApp() {
     form.dispatchEvent(event);
     assert.equal(event.defaultPrevented, true, 'form submission must not reload the page');
   };
-  return { get, form, workers, submit, centers };
+  const click = id => get(id).dispatchEvent(new Event('click'));
+  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard };
 }
 
 test('submitting settings reruns analysis with the latest input and opens the results', () => {
@@ -170,4 +187,67 @@ test('an excessive constellation reports an error and preserves the last valid r
   assert.equal(workers.length, 1);
   assert.match(get('config-error').textContent, /512/);
   assert.equal(get('fleet-count').textContent, 'LEO 256기');
+});
+
+test('a shared-link hash restores the scenario into the form and worker requests', () => {
+  const hash = '#cfg=' + encodeURIComponent(JSON.stringify({ altitude: 1280, planes: 6, satellitesPerPlane: 6 }));
+  const { form, workers } = startApp({ hash });
+  assert.equal(form.elements.altitude.value, '1280');
+  assert.equal(form.elements.planes.value, '6');
+  workers[0].complete();
+  assert.equal(workers[0].request.config.altitude, 1280);
+});
+
+test('an invalid shared-link hash is ignored and falls back to defaults', () => {
+  const { form, workers } = startApp({ hash: '#cfg=' + encodeURIComponent(JSON.stringify({ altitude: 99999 })) });
+  assert.equal(form.elements.altitude.value, String(engine.DEFAULT_CONFIG.altitude));
+  workers[0].complete();
+});
+
+test('malformed hash content does not throw during startup', () => {
+  const { form } = startApp({ hash: '#cfg=not-json' });
+  assert.equal(form.elements.altitude.value, String(engine.DEFAULT_CONFIG.altitude));
+});
+
+test('sharing copies a compact link containing only the changed settings', async () => {
+  const { form, submit, workers, click, clipboard, historyCalls, location } = startApp();
+  workers[0].complete();
+  form.elements.altitude.value = '1280';
+  submit();
+  workers[1].complete();
+  click('share-config');
+  await Promise.resolve();
+  const encoded = clipboard.text.split('cfg=')[1];
+  const diff = JSON.parse(decodeURIComponent(encoded));
+  assert.deepEqual(diff, { altitude: 1280 });
+  assert.equal(historyCalls.length, 1);
+  assert.equal(location.hash, '#cfg=' + encodeURIComponent(JSON.stringify({ altitude: 1280 })));
+});
+
+test('sharing the default scenario produces a link with no hash', async () => {
+  const { workers, click, clipboard } = startApp();
+  workers[0].complete();
+  click('share-config');
+  await Promise.resolve();
+  assert.ok(!clipboard.text.includes('#'));
+});
+
+test('switching the sweep axis updates the trade-study intro text', () => {
+  const { get, workers, submit, click } = startApp();
+  workers[0].complete();
+  submit();
+  assert.match(get('sweep-intro').textContent, /항법 시간을 0–40%/);
+  get('sweep-axis').value = 'altitude';
+  get('sweep-axis').dispatchEvent(new Event('change'));
+  assert.match(get('sweep-intro').textContent, /궤도 고도를 400–2,000 km/);
+  workers[1].complete();
+});
+
+test('a clipboard failure still updates the address bar and reports the problem', async () => {
+  const { workers, click, get, historyCalls } = startApp({ clipboardFails: true });
+  workers[0].complete();
+  click('share-config');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(historyCalls.length, 1);
+  assert.match(get('share-status').textContent, /실패/);
 });

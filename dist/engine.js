@@ -52,8 +52,6 @@ export function getLocation(config) {
     ? { name: '사용자 지정', lat: config.latitude, lon: config.longitude }
     : LOCATIONS[config.location];
 }
-function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-function norm(a) { return Math.sqrt(dot(a, a)); }
 export function observerFrame(latDeg, lonDeg) {
   const lat = latDeg * RAD, lon = lonDeg * RAD;
   const up = [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
@@ -61,11 +59,13 @@ export function observerFrame(latDeg, lonDeg) {
     east: [-Math.sin(lon), Math.cos(lon), 0],
     north: [-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat)] };
 }
-export function orbitState(orbit, timeSeconds) {
+export function orbitState(orbit, timeSeconds, phaseOverride) {
   const a = orbit.radius, n = Math.sqrt(MU / (a * a * a));
-  const u = orbit.phase + n * timeSeconds, o = orbit.raan;
-  const cu = Math.cos(u), su = Math.sin(u), co = Math.cos(o), so = Math.sin(o);
-  const ci = Math.cos(orbit.inclination), si = Math.sin(orbit.inclination);
+  const u = (phaseOverride ?? orbit.phase) + n * timeSeconds;
+  const cu = Math.cos(u), su = Math.sin(u);
+  // raan/inclination are fixed per orbit; buildConstellations precomputes their cos/sin once
+  // instead of every call, since this runs per satellite per sample (up to ~536 x 288 per day).
+  const co = orbit.raanCos, so = orbit.raanSin, ci = orbit.incCos, si = orbit.incSin;
   const inertial = [a * (co * cu - so * su * ci), a * (so * cu + co * su * ci), a * su * si];
   const velocity = [a * n * (-co * su - so * cu * ci), a * n * (-so * su + co * cu * ci), a * n * cu * si];
   const theta = EARTH_RATE * timeSeconds, ct = Math.cos(theta), st = Math.sin(theta);
@@ -100,14 +100,20 @@ export function buildConstellations(config) {
         radius, inclination: 43 * RAD, raan: 128 * RAD - phase, phase });
     }
   }
-  return out;
+  return out.map(o => ({ ...o, raanCos: Math.cos(o.raan), raanSin: Math.sin(o.raan), incCos: Math.cos(o.inclination), incSin: Math.sin(o.inclination) }));
 }
 export function observe(state, frame) {
-  const d = state.position.map((v, i) => v - frame.position[i]);
-  const range = norm(d), los = d.map(v => v / range);
-  const e = dot(los, frame.east), n = dot(los, frame.north), u = dot(los, frame.up);
+  // Scalar math instead of .map()-built intermediate arrays: called per satellite per sample
+  // (up to ~536 x 288 for a full-day run), so the array allocations here were real GC pressure.
+  const dx = state.position[0] - frame.position[0], dy = state.position[1] - frame.position[1], dz = state.position[2] - frame.position[2];
+  const range = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const lx = dx / range, ly = dy / range, lz = dz / range;
+  const e = lx * frame.east[0] + ly * frame.east[1] + lz * frame.east[2];
+  const n = lx * frame.north[0] + ly * frame.north[1] + lz * frame.north[2];
+  const u = lx * frame.up[0] + ly * frame.up[1] + lz * frame.up[2];
+  const rangeRate = state.velocity[0] * lx + state.velocity[1] * ly + state.velocity[2] * lz;
   return { range, elevation: Math.asin(Math.max(-1, Math.min(1, u))) / RAD,
-    azimuth: (Math.atan2(e, n) / RAD + 360) % 360, losENU: [e, n, u], rangeRate: dot(state.velocity, los) };
+    azimuth: (Math.atan2(e, n) / RAD + 360) % 360, losENU: [e, n, u], rangeRate };
 }
 export function invert(matrix) {
   const n = matrix.length, max = Math.max(...matrix.flat().map(Math.abs));
@@ -166,7 +172,7 @@ export function snapshot(config, minutes = 0, constellation) {
   return evaluateSnapshot(cfg, prepareGeometry(cfg, minutes, constellation));
 }
 // Orbit propagation and observer geometry do not depend on navigation time allocation.
-function prepareGeometry(cfg, minutes, constellation) {
+export function prepareGeometry(cfg, minutes, constellation) {
   if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440) throw new Error('시각은 0–1440분 범위입니다.');
   const satList = constellation || buildConstellations(cfg), location = getLocation(cfg);
   const frame = observerFrame(location.lat, location.lon);
@@ -176,7 +182,7 @@ function prepareGeometry(cfg, minutes, constellation) {
   });
   return { minutes, location, observer: frame.position, satellites };
 }
-function evaluateSnapshot(cfg, geometry) {
+export function evaluateSnapshot(cfg, geometry) {
   const { minutes, location, observer } = geometry;
   const measurements = [], gnss = [], regional = [], leo = [], states = [];
   let best = null;
@@ -243,10 +249,43 @@ export function summarize(samples, config) {
     minLEO: Math.min(...samples.map(s => s.leoVisible)), maxLEO: Math.max(...samples.map(s => s.leoVisible)) };
 }
 export function resourceSweep(config, minutes) {
-  const cfg = { ...validateConfig(config), sharing: 'time' };
-  const geometry = prepareGeometry(cfg, minutes);
-  return Array.from({ length: 21 }, (_, i) => {
-    const s = evaluateSnapshot({ ...cfg, navShare: i * 2 }, geometry);
-    return { navShare: i * 2, rate: s.rate, hrms: s.fusion.hrms };
+  return parameterSweep(config, minutes, 'navShare');
+}
+// Ranges mirror validateConfig's own limits for each field.
+const SWEEP_SPECS = {
+  navShare: { min: 0, max: 40, steps: 21 },
+  altitude: { min: 400, max: 2000, steps: 17 },
+  inclination: { min: 0, max: 90, steps: 19 },
+  planes: { min: 1, max: 32, steps: 32, integer: true },
+  satellitesPerPlane: { min: 4, max: 32, steps: 15, integer: true },
+  payloadPercent: { min: 0, max: 100, steps: 21 },
+};
+export const SWEEP_AXES = Object.keys(SWEEP_SPECS);
+function sweepAxisPoints({ min, max, steps, integer }) {
+  return Array.from({ length: steps }, (_, i) => {
+    const raw = min + (max - min) * i / (steps - 1);
+    return integer ? Math.round(raw) : Math.round(raw * 100) / 100;
+  });
+}
+// Sweeps a single design variable across its full valid range, holding everything
+// else fixed, so a trade study can compare e.g. altitude or plane count rather
+// than only the original navigation-time-share axis. Points whose combination
+// happens to be infeasible (e.g. planes × satellitesPerPlane > 512) are marked
+// unavailable instead of aborting the whole sweep.
+export function parameterSweep(config, minutes, axis = 'navShare') {
+  const spec = SWEEP_SPECS[axis];
+  if (!spec) throw new Error('지원하지 않는 스윕 변수: ' + axis);
+  const base = axis === 'navShare' ? { ...validateConfig(config), sharing: 'time' } : validateConfig(config);
+  // navShare alone doesn't change satellite geometry, so it can reuse one prepared geometry.
+  const sharedGeometry = axis === 'navShare' ? prepareGeometry(base, minutes) : null;
+  return sweepAxisPoints(spec).map(value => {
+    try {
+      const cfg = validateConfig({ ...base, [axis]: value });
+      const geometry = sharedGeometry || prepareGeometry(cfg, minutes);
+      const s = evaluateSnapshot(cfg, geometry);
+      return { [axis]: value, rate: s.rate, hrms: s.fusion.hrms, unavailable: false };
+    } catch {
+      return { [axis]: value, rate: null, hrms: null, unavailable: true };
+    }
   });
 }
