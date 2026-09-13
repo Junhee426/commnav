@@ -74,32 +74,64 @@ export function orbitState(orbit, timeSeconds, phaseOverride) {
     -st * velocity[0] + ct * velocity[1] - EARTH_RATE * p[0], velocity[2]];
   return { position: p, velocity: v };
 }
+// Generates one Walker Delta (F=1) constellation: `planes` equally spaced orbit planes,
+// `satellitesPerPlane` satellites evenly phased within each plane, plus an
+// inter-plane phase offset (F=1) so planes interleave. Both the user-configured LEO
+// fleet and the fixed GNSS reference below are this same pattern with different
+// numbers, so this is the one place that math has to be right, and adding another
+// fixed walker-type constellation (e.g. a different GNSS baseline) is a new spec
+// object rather than a new copy of the loop.
+export function walkerDelta({ planes, satellitesPerPlane, radius, inclinationDeg, phaseOffset = 0 }) {
+  const total = planes * satellitesPerPlane, sats = [];
+  for (let p = 0; p < planes; p++) for (let s = 0; s < satellitesPerPlane; s++) {
+    sats.push({ plane: p, index: p * satellitesPerPlane + s, radius, inclination: inclinationDeg * RAD,
+      raan: TAU * p / planes, phase: TAU * s / satellitesPerPlane + TAU * p / total + phaseOffset });
+  }
+  return sats;
+}
+// Idealized 24-satellite MEO reference; not live GPS/Galileo broadcast orbits.
+// This spec is the seam for the roadmap's "real GNSS ephemeris input": replace or
+// supplement it without touching buildConstellations or walkerDelta.
+export const GNSS_REFERENCE = Object.freeze({
+  planes: 6, satellitesPerPlane: 4, altitudeKm: 20200, inclinationDeg: 55,
+  phaseOffset: 0.35, idPrefix: 'G', idDigits: 2,
+});
+// Regional reference constellation: an assumption, NOT an official KPS design orbit
+// (see README). GEO arc: `geoCount` satellites spaced `geoSpacingDeg` apart starting
+// at `geoStartDeg` longitude. IGSO: `igsoCount` satellites sharing one inclined
+// ground track, evenly phased. This spec is the seam for the roadmap's "official KPS
+// design orbit" item: swap these numbers, or add another regional/augmentation
+// system, without touching the generation logic below.
+export const REGIONAL_REFERENCE = Object.freeze({
+  geoCount: 3, geoStartDeg: 120, geoSpacingDeg: 8,
+  igsoCount: 5, igsoInclinationDeg: 43, igsoCenterDeg: 128,
+});
+function buildRegionalReference(spec) {
+  const radius = Math.cbrt(MU / (EARTH_RATE * EARTH_RATE)), sats = [];
+  for (let i = 0; i < spec.geoCount; i++) sats.push({ id: 'R' + (i + 1), group: 'REGIONAL', payload: true,
+    radius, inclination: 0, raan: (spec.geoStartDeg + i * spec.geoSpacingDeg) * RAD, phase: 0 });
+  for (let i = 0; i < spec.igsoCount; i++) {
+    const phase = TAU * i / spec.igsoCount;
+    sats.push({ id: 'R' + (i + spec.geoCount + 1), group: 'REGIONAL', payload: true,
+      radius, inclination: spec.igsoInclinationDeg * RAD, raan: spec.igsoCenterDeg * RAD - phase, phase });
+  }
+  return sats;
+}
 export function buildConstellations(config) {
   const cfg = validateConfig(config), out = [];
-  const total = cfg.planes * cfg.satellitesPerPlane;
-  for (let p = 0; p < cfg.planes; p++) for (let s = 0; s < cfg.satellitesPerPlane; s++) {
-    const i = p * cfg.satellitesPerPlane + s;
+  for (const sat of walkerDelta({ planes: cfg.planes, satellitesPerPlane: cfg.satellitesPerPlane,
+    radius: EARTH_RADIUS + cfg.altitude, inclinationDeg: cfg.inclination })) {
+    const i = sat.index;
     const payload = cfg.leoNav && Math.floor((i + 1) * cfg.payloadPercent / 100 + 1e-9) > Math.floor(i * cfg.payloadPercent / 100 + 1e-9);
-    out.push({ id: 'L' + String(i + 1).padStart(3, '0'), group: 'LEO', plane: p, payload,
-      radius: EARTH_RADIUS + cfg.altitude, inclination: cfg.inclination * RAD,
-      raan: TAU * p / cfg.planes, phase: TAU * s / cfg.satellitesPerPlane + TAU * p / total });
+    out.push({ id: 'L' + String(i + 1).padStart(3, '0'), group: 'LEO', plane: sat.plane, payload,
+      radius: sat.radius, inclination: sat.inclination, raan: sat.raan, phase: sat.phase });
   }
-  // Idealized 24-satellite MEO reference; not live GPS/Galileo broadcast orbits.
-  for (let p = 0; p < 6; p++) for (let s = 0; s < 4; s++) {
-    out.push({ id: 'G' + String(p * 4 + s + 1).padStart(2, '0'), group: 'GNSS', payload: true,
-      radius: EARTH_RADIUS + 20200, inclination: 55 * RAD,
-      raan: TAU * p / 6, phase: TAU * s / 4 + TAU * p / 24 + 0.35 });
+  for (const sat of walkerDelta({ planes: GNSS_REFERENCE.planes, satellitesPerPlane: GNSS_REFERENCE.satellitesPerPlane,
+    radius: EARTH_RADIUS + GNSS_REFERENCE.altitudeKm, inclinationDeg: GNSS_REFERENCE.inclinationDeg, phaseOffset: GNSS_REFERENCE.phaseOffset })) {
+    out.push({ id: GNSS_REFERENCE.idPrefix + String(sat.index + 1).padStart(GNSS_REFERENCE.idDigits, '0'), group: 'GNSS', payload: true,
+      radius: sat.radius, inclination: sat.inclination, raan: sat.raan, phase: sat.phase });
   }
-  if (cfg.regional) {
-    const radius = Math.cbrt(MU / (EARTH_RATE * EARTH_RATE));
-    for (let i = 0; i < 3; i++) out.push({ id: 'R' + (i + 1), group: 'REGIONAL', payload: true,
-      radius, inclination: 0, raan: (120 + i * 8) * RAD, phase: 0 });
-    for (let i = 0; i < 5; i++) {
-      const phase = TAU * i / 5;
-      out.push({ id: 'R' + (i + 4), group: 'REGIONAL', payload: true,
-        radius, inclination: 43 * RAD, raan: 128 * RAD - phase, phase });
-    }
-  }
+  if (cfg.regional) out.push(...buildRegionalReference(REGIONAL_REFERENCE));
   return out.map(o => ({ ...o, raanCos: Math.cos(o.raan), raanSin: Math.sin(o.raan), incCos: Math.cos(o.inclination), incSin: Math.sin(o.inclination) }));
 }
 export function observe(state, frame) {
