@@ -240,7 +240,8 @@ function downloadCSV() {
   const used = lastAnalysis.config;
   const headers = ['model_version', 'elapsed_minutes', 'downlink_mbps', 'fusion_horizontal_rms_m', 'gnss_horizontal_rms_m', 'gnss_leo_horizontal_rms_m', 'fusion_pdop', 'one_way_delay_ms', 'comm_visible_leo', 'navigation_leo', 'navigation_gnss', 'navigation_regional', 'comm_target_met', 'nav_target_met', 'joint_targets_met', 'scenario_config_json'];
   const quote = value => '"' + String(value ?? '').replaceAll('"', '""') + '"';
-  const rows = lastAnalysis.samples.map(s => [MODEL_VERSION, s.minutes, s.rate, s.hrms, s.baseline, s.gnssLEO, s.pdop, s.delayMs, s.commVisible, s.leoVisible, s.gnssVisible, s.regionalVisible, s.commPass, s.navPass, s.jointPass, JSON.stringify(used)]);
+  const usedJSON = JSON.stringify(used); // identical for every sample row; stringify once instead of per row (288 samples/day today, more if sampling gets finer)
+  const rows = lastAnalysis.samples.map(s => [MODEL_VERSION, s.minutes, s.rate, s.hrms, s.baseline, s.gnssLEO, s.pdop, s.delayMs, s.commVisible, s.leoVisible, s.gnssVisible, s.regionalVisible, s.commPass, s.navPass, s.jointPass, usedJSON]);
   const csv = '\ufeff' + [headers, ...rows].map(row => row.map(quote).join(',')).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
   const a = document.createElement('a'); a.href = url; a.download = 'KLEO_COMM_PNT_' + used.location + '_24h.csv'; a.click();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_CONFIG, EARTH_RADIUS, LOCATIONS, validateConfig, buildConstellations, orbitState, observerFrame, observe, snapshot, positionAccuracy, linkBudget, compactSample, summarize, resourceSweep, parameterSweep, SWEEP_AXES } from '../dist/engine.js';
+import { DEFAULT_CONFIG, EARTH_RADIUS, LOCATIONS, validateConfig, buildConstellations, walkerDelta, GNSS_REFERENCE, REGIONAL_REFERENCE, orbitState, observerFrame, observe, snapshot, positionAccuracy, linkBudget, compactSample, summarize, resourceSweep, parameterSweep, SWEEP_AXES } from '../dist/engine.js';
 
 const close = (actual, expected, tolerance = 1e-8) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} != ${expected}`);
 const norm = a => Math.hypot(...a);
@@ -16,6 +16,31 @@ test('circular orbital radius and constellation counts remain physical', () => {
     for (const orbit of orbits) for (const t of [0, 1834, 7349]) close(norm(orbitState(orbit,t).position),orbit.radius,1e-7);
     close(orbits[0].radius, EARTH_RADIUS+altitude);
   }
+});
+
+test('walkerDelta is the shared generator behind both the user LEO fleet and the fixed GNSS reference', () => {
+  const grid = walkerDelta({ planes: 2, satellitesPerPlane: 3, radius: 7000, inclinationDeg: 45 });
+  assert.equal(grid.length, 6);
+  assert.deepEqual(grid.map(s => s.plane), [0, 0, 0, 1, 1, 1]);
+  assert.deepEqual(grid.map(s => s.index), [0, 1, 2, 3, 4, 5]);
+  close(grid[0].raan, 0); close(grid[3].raan, Math.PI);
+  close(grid[0].inclination, 45 * Math.PI / 180);
+  const offset = walkerDelta({ planes: 1, satellitesPerPlane: 1, radius: 7000, inclinationDeg: 0, phaseOffset: 1.2 });
+  close(offset[0].phase, 1.2);
+  // buildConstellations' fixed GNSS block must match calling walkerDelta directly with GNSS_REFERENCE.
+  const viaBuild = buildConstellations(cfg).filter(o => o.group === 'GNSS');
+  const viaSpec = walkerDelta({ planes: GNSS_REFERENCE.planes, satellitesPerPlane: GNSS_REFERENCE.satellitesPerPlane,
+    radius: EARTH_RADIUS + GNSS_REFERENCE.altitudeKm, inclinationDeg: GNSS_REFERENCE.inclinationDeg, phaseOffset: GNSS_REFERENCE.phaseOffset });
+  assert.equal(viaBuild.length, viaSpec.length);
+  viaBuild.forEach((sat, i) => { close(sat.raan, viaSpec[i].raan); close(sat.phase, viaSpec[i].phase); close(sat.radius, viaSpec[i].radius); });
+});
+
+test('the regional reference spec is data, not code: changing it changes the constellation with no other edits', () => {
+  const stock = buildConstellations({ ...cfg, regional: true }).filter(o => o.group === 'REGIONAL');
+  assert.equal(stock.length, REGIONAL_REFERENCE.geoCount + REGIONAL_REFERENCE.igsoCount);
+  assert.equal(stock[0].id, 'R1');
+  close(stock[0].raan, REGIONAL_REFERENCE.geoStartDeg * Math.PI / 180);
+  close(stock[REGIONAL_REFERENCE.geoCount].inclination, REGIONAL_REFERENCE.igsoInclinationDeg * Math.PI / 180);
 });
 
 test('geostationary example remains fixed in ECEF', () => {

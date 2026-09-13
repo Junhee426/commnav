@@ -29,6 +29,7 @@ class Element extends EventTarget {
   append() {}
   replaceChildren() {}
   insertBefore() {}
+  click() {}
 }
 
 function startApp(options = {}) {
@@ -57,9 +58,11 @@ function startApp(options = {}) {
       this.onmessage({ data: { type: 'result', requestId, config, samples, summary: engine.summarize(samples, config) } });
     }
   }
+  const createdElements = [];
   const document = Object.assign(new EventTarget(), {
     getElementById: get, querySelector: get,
-    createElement: () => new Element(), createTextNode: text => text,
+    createElement: tag => { const el = new Element(); el.tagName = tag; createdElements.push(el); return el; },
+    createTextNode: text => text,
     createDocumentFragment: () => new Element(),
   });
   const location = { href: options.href || 'https://example.test/comm-nav', hash: options.hash || '' };
@@ -84,7 +87,7 @@ function startApp(options = {}) {
     Globe: class { set() {} center(lat, lon) { centers.push([lat, lon]); } draw() {} },
     skyPlot() {}, lineChart() {},
     ResizeObserver: class { observe() {} },
-    Worker, URL, setTimeout, clearTimeout, setInterval, clearInterval,
+    Worker, URL, Blob, setTimeout, clearTimeout, setInterval, clearInterval,
   });
   const submit = () => {
     const event = new Event('submit', { cancelable: true });
@@ -92,7 +95,7 @@ function startApp(options = {}) {
     assert.equal(event.defaultPrevented, true, 'form submission must not reload the page');
   };
   const click = id => get(id).dispatchEvent(new Event('click'));
-  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard };
+  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard, createdElements };
 }
 
 test('submitting settings reruns analysis with the latest input and opens the results', () => {
@@ -241,6 +244,28 @@ test('switching the sweep axis updates the trade-study intro text', () => {
   get('sweep-axis').dispatchEvent(new Event('change'));
   assert.match(get('sweep-intro').textContent, /궤도 고도를 400–2,000 km/);
   workers[1].complete();
+});
+
+test('CSV export writes one row per sample and reuses the same scenario JSON for every row', async () => {
+  const { workers, submit, click, createdElements } = startApp();
+  workers[0].complete();
+  submit();
+  workers[1].complete();
+  click('export-csv');
+  const anchor = createdElements.filter(el => el.tagName === 'a').at(-1);
+  assert.ok(anchor, 'export must create a download link');
+  assert.ok(anchor.download.startsWith('KLEO_COMM_PNT_'));
+  assert.ok(anchor.href.startsWith('blob:'));
+  const csv = await (await fetch(anchor.href)).text();
+  const lines = csv.replace(/^﻿/, '').split('\r\n').filter(Boolean);
+  const parseRow = line => [...line.matchAll(/"((?:[^"]|"")*)"/g)].map(m => m[1].replaceAll('""', '"'));
+  const header = parseRow(lines[0]);
+  assert.equal(header[0], 'model_version');
+  assert.equal(header.at(-1), 'scenario_config_json');
+  const dataRows = lines.slice(1).map(parseRow);
+  assert.equal(dataRows.length, 1); // the fake worker in this harness returns exactly one sample
+  const configs = dataRows.map(row => JSON.parse(row.at(-1)));
+  assert.ok(configs.every(cfg => cfg.altitude === workers[1].request.config.altitude), 'every row must carry the same scenario config that produced it');
 });
 
 test('a clipboard failure still updates the address bar and reports the problem', async () => {
