@@ -43,6 +43,44 @@ test('the regional reference spec is data, not code: changing it changes the con
   close(stock[REGIONAL_REFERENCE.geoCount].inclination, REGIONAL_REFERENCE.igsoInclinationDeg * Math.PI / 180);
 });
 
+test('walkerDelta defaults to F=1 and honors an explicit phasing factor', () => {
+  const base = { planes: 4, satellitesPerPlane: 6, radius: 7000, inclinationDeg: 45 };
+  const defaultF = walkerDelta(base);
+  const explicitF1 = walkerDelta({ ...base, F: 1 });
+  defaultF.forEach((sat, i) => close(sat.phase, explicitF1[i].phase));
+  // Standard Walker Delta phasing: adjacent-plane phase step is F * 360deg / total.
+  const TAU = 2 * Math.PI, total = base.planes * base.satellitesPerPlane;
+  for (const F of [0, 2, 3]) {
+    const grid = walkerDelta({ ...base, F });
+    const plane0 = grid.find(s => s.plane === 0 && s.index % base.satellitesPerPlane === 0);
+    const plane1 = grid.find(s => s.plane === 1 && s.index % base.satellitesPerPlane === 0);
+    close(((plane1.phase - plane0.phase) % TAU + TAU) % TAU, (TAU * F / total) % TAU);
+  }
+});
+
+test('validateConfig enforces walkerF as an integer within [0, 31], independent of planes', () => {
+  assert.equal(validateConfig({ ...cfg, planes: 8, walkerF: 7 }).walkerF, 7);
+  assert.equal(validateConfig({ ...cfg, planes: 8, walkerF: 0 }).walkerF, 0);
+  assert.equal(validateConfig({ ...cfg, planes: 8, walkerF: 31 }).walkerF, 31);
+  assert.throws(() => validateConfig({ ...cfg, walkerF: 32 }), /walkerF/);
+  assert.throws(() => validateConfig({ ...cfg, walkerF: -1 }), /walkerF/);
+  assert.throws(() => validateConfig({ ...cfg, walkerF: 1.5 }), /위상 계수 F/);
+  // F stays valid even when it numerically exceeds the (unrelated) plane count: F and F+planes
+  // describe geometrically equivalent constellations, so no cross-field rejection is needed.
+  assert.equal(validateConfig({ ...cfg, planes: 2, walkerF: 5 }).walkerF, 5);
+  assert.equal(validateConfig({ ...cfg, planes: 1, walkerF: 1 }).walkerF, 1);
+});
+
+test('buildConstellations threads cfg.walkerF into the LEO fleet, leaving the fixed GNSS reference at its own F', () => {
+  const withF2 = buildConstellations({ ...cfg, planes: 4, satellitesPerPlane: 6, walkerF: 2 }).filter(o => o.group === 'LEO');
+  const viaSpec = walkerDelta({ planes: 4, satellitesPerPlane: 6, radius: EARTH_RADIUS + cfg.altitude, inclinationDeg: cfg.inclination, F: 2 });
+  withF2.forEach((sat, i) => close(sat.phase, viaSpec[i].phase));
+  // GNSS reference ignores the LEO fleet's F entirely: identical to the F=1 default case.
+  const gnssWithF2 = buildConstellations({ ...cfg, walkerF: 2 }).filter(o => o.group === 'GNSS');
+  const gnssDefault = buildConstellations(cfg).filter(o => o.group === 'GNSS');
+  gnssWithF2.forEach((sat, i) => close(sat.phase, gnssDefault[i].phase));
+});
+
 test('geostationary example remains fixed in ECEF', () => {
   const orbit=buildConstellations({...cfg,regional:true}).find(o=>o.id==='R1');
   const first=orbitState(orbit,0).position, later=orbitState(orbit,31000).position;

@@ -25,7 +25,7 @@ const SWEEP_AXIS_META = {
   satellitesPerPlane: { max: 32, label: '면당 위성 수', intro: '현재 입력값을 유지하고 면당 위성 수를 4–32기로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
   payloadPercent: { max: 100, label: '항법 탑재 비율 (%)', intro: '현재 입력값을 유지하고 항법 탑재 위성 비율을 0–100%로 변경한 비교입니다.' },
 };
-const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'leoNav', 'payloadPercent', 'regional'];
+const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'walkerF', 'leoNav', 'payloadPercent', 'regional'];
 const globe = new Globe($('globe'));
 const fields = [...form.querySelectorAll('[data-config]')];
 function syncFieldsToConfig(cfg) {
@@ -72,7 +72,7 @@ function updateAnalysisNotice() {
 function updateControlLabels() {
   $('custom-location').hidden = config.location !== 'custom';
   form.elements.latitude.disabled = form.elements.longitude.disabled = config.location !== 'custom';
-  text('constellation-note', `${config.planes}면 × 면당 ${config.satellitesPerPlane}기 = 총 ${config.planes * config.satellitesPerPlane}기 · Walker Delta F=1`);
+  text('constellation-note', `${config.planes}면 × 면당 ${config.satellitesPerPlane}기 = 총 ${config.planes * config.satellitesPerPlane}기 · Walker Delta F=${config.walkerF}`);
   text('payload-value', config.payloadPercent + '%'); text('share-value', config.navShare + '%');
   const share = form.elements.navShare;
   share.disabled = config.sharing === 'separate' || !config.leoNav || config.payloadPercent === 0;

@@ -33,6 +33,7 @@
             <label class="field"><span>경사각 <small>°</small></span><input name="inclination" data-config="inclination" type="number" min="0" max="90" step="1" value="42"></label>
           </div>
           <label class="field"><span>궤도면당 위성 수 <small>기</small></span><input name="satellitesPerPlane" data-config="satellitesPerPlane" type="number" min="4" max="32" step="1" value="16" aria-describedby="constellation-note"></label>
+          <label class="field"><span>Walker 위상 계수 F</span><input name="walkerF" data-config="walkerF" type="number" min="0" max="31" step="1" value="1" aria-describedby="constellation-note"></label>
           <label class="field"><span>관측지</span><select name="location" data-config="location"><option value="seoul">서울 · 대한민국</option><option value="busan">부산 · 대한민국</option><option value="jeju">제주 · 대한민국</option><option value="abudhabi">아부다비 · UAE</option><option value="singapore">싱가포르</option><option value="jakarta">자카르타 · 인도네시아</option><option value="custom">위도·경도 직접 입력</option></select></label>
           <div id="custom-location" hidden>
             <div class="field-pair">
@@ -46,7 +47,7 @@
             <label class="field"><span>항법 최소고도각 <small>°</small></span><input name="navElevation" data-config="navElevation" type="number" min="5" max="60" step="1" value="10"></label>
           </div>
           <p id="constellation-note" class="field-note" aria-live="polite">16면 × 면당 16기 = 총 256기 · Walker Delta F=1</p>
-          <p class="field-note">궤도면 1–32개, 면당 4–32기 · 총 512기까지</p>
+          <p class="field-note">궤도면 1–32개, 면당 4–32기 · 총 512기까지 · 위상 계수 F는 0–31의 정수</p>
         </section>
         <section class="control-section">
           <h2><span>02</span> 항법 구성과 자원</h2>
@@ -130,7 +131,7 @@
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="dialog-heading"><div><p class="eyebrow">MODEL NOTES</p><h2 id="model-title">계산모델과 해석 범위</h2></div><button id="close-model" type="button" class="button small">닫기</button></div>
     <div class="model-content">
-      <h3>위성군과 시각</h3><p>LEO는 원궤도 Walker Delta(F=1), GNSS는 고도 20,200 km·경사각 55°·6면×4기의 가상 기준군입니다. 기준시각의 지구 회전각을 0으로 두며 TLE·실제 달력시각을 사용하지 않습니다. 지구 반경 6,378.137 km의 구형 지구와 2체 궤도·지구 자전을 적용합니다.</p>
+      <h3>위성군과 시각</h3><p>LEO는 원궤도 Walker Delta(위상 계수 F, 기본값 1이며 사용자 설정 가능), GNSS는 고도 20,200 km·경사각 55°·6면×4기·F=1의 가상 기준군입니다. 기준시각의 지구 회전각을 0으로 두며 TLE·실제 달력시각을 사용하지 않습니다. 지구 반경 6,378.137 km의 구형 지구와 2체 궤도·지구 자전을 적용합니다.</p>
       <p>지역항법 옵션은 GEO 경도 120°/128°/136°, IGSO 중심경도 128°·경사각 43°의 설명용 8기 배치입니다. 공식 KPS 설계궤도·성능값을 나타내지 않습니다.</p>
       <h3>항법 오차</h3><p>위성별 거리측정에 가중최소제곱 공분산을 적용합니다. 수신기 위치 3축과 각 항법망의 공통 시각차를 함께 추정합니다. 위성이 부족하거나 기하행렬이 불안정하면 ‘측위 불가’로 처리합니다.</p>
       <p>수평 RMS는 동·북 위치오차 분산 합의 제곱근입니다. 95% 신뢰반경이나 실제 측정오차를 뜻하지 않습니다. PDOP는 거리오차와 구분되는 기하학적 지표이며, 여기서는 항법망별 시각차를 포함한 모형을 사용합니다.</p>

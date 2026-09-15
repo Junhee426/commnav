@@ -15,7 +15,7 @@ export const LOCATIONS = {
   jakarta: { name: '자카르타', lat: -6.2088, lon: 106.8456 },
 };
 export const DEFAULT_CONFIG = Object.freeze({
-  altitude: 888, inclination: 42, planes: 16, satellitesPerPlane: 16,
+  altitude: 888, inclination: 42, planes: 16, satellitesPerPlane: 16, walkerF: 1,
   location: 'seoul', latitude: 37.5665, longitude: 126.978, commElevation: 20, navElevation: 10,
   leoNav: true, payloadPercent: 100, regional: false,
   sharing: 'separate', navShare: 10,
@@ -29,7 +29,7 @@ export function validateConfig(input) {
   for (const key of Object.keys(input)) if (!known.has(key)) throw new Error('알 수 없는 설정: ' + key);
   const cfg = { ...DEFAULT_CONFIG, ...input };
   const limits = {
-    altitude: [400, 2000], inclination: [0, 90], planes: [1, 32], satellitesPerPlane: [4, 32],
+    altitude: [400, 2000], inclination: [0, 90], planes: [1, 32], satellitesPerPlane: [4, 32], walkerF: [0, 31],
     latitude: [-90, 90], longitude: [-180, 180],
     commElevation: [5, 60], navElevation: [5, 60], payloadPercent: [0, 100], navShare: [0, 40],
     gnssSigma: [0.1, 30], leoSigma: [0.1, 30], orbitSigma: [0, 30], clockNs: [0, 1000],
@@ -40,8 +40,13 @@ export function validateConfig(input) {
     if (typeof cfg[key] !== 'number' || !Number.isFinite(cfg[key]) || cfg[key] < lo || cfg[key] > hi)
       throw new Error(key + ': ' + lo + '–' + hi + ' 범위의 수치를 입력해 주세요.');
   }
-  if (!Number.isInteger(cfg.planes) || !Number.isInteger(cfg.satellitesPerPlane)) throw new Error('궤도면·위성 수는 정수여야 합니다.');
+  if (!Number.isInteger(cfg.planes) || !Number.isInteger(cfg.satellitesPerPlane) || !Number.isInteger(cfg.walkerF))
+    throw new Error('궤도면 수·위성 수·위상 계수 F는 정수여야 합니다.');
   if (cfg.planes * cfg.satellitesPerPlane > 512) throw new Error('LEO 위성은 총 512기까지 계산합니다. 궤도면 수 또는 면당 위성 수를 줄여 주세요.');
+  // F and F+planes describe geometrically equivalent Walker Delta constellations (shifting F by
+  // a full plane count just relabels each plane's own satellites), so F is left independent of
+  // the plane count here rather than clamped to [0, planes): a fixed range keeps validation
+  // (and every sweep axis, including planes itself) simple without rejecting otherwise-valid input.
   for (const key of ['leoNav', 'regional']) if (typeof cfg[key] !== 'boolean') throw new Error(key + ' 값을 확인해 주세요.');
   if (typeof cfg.location !== 'string' || (cfg.location !== 'custom' && !Object.hasOwn(LOCATIONS, cfg.location))) throw new Error('관측지를 선택해 주세요.');
   if (!['separate', 'time'].includes(cfg.sharing)) throw new Error('신호 공유 방식을 선택해 주세요.');
@@ -74,18 +79,19 @@ export function orbitState(orbit, timeSeconds, phaseOverride) {
     -st * velocity[0] + ct * velocity[1] - EARTH_RATE * p[0], velocity[2]];
   return { position: p, velocity: v };
 }
-// Generates one Walker Delta (F=1) constellation: `planes` equally spaced orbit planes,
-// `satellitesPerPlane` satellites evenly phased within each plane, plus an
-// inter-plane phase offset (F=1) so planes interleave. Both the user-configured LEO
-// fleet and the fixed GNSS reference below are this same pattern with different
-// numbers, so this is the one place that math has to be right, and adding another
-// fixed walker-type constellation (e.g. a different GNSS baseline) is a new spec
-// object rather than a new copy of the loop.
-export function walkerDelta({ planes, satellitesPerPlane, radius, inclinationDeg, phaseOffset = 0 }) {
+// Generates one Walker Delta (F, default 1) constellation: `planes` equally spaced orbit
+// planes, `satellitesPerPlane` satellites evenly phased within each plane, plus an
+// inter-plane phasing factor F (in-plane phase step of F*360/total degrees between
+// adjacent planes) so planes interleave. Both the user-configured LEO fleet and the
+// fixed GNSS reference below are this same pattern with different numbers, so this is
+// the one place that math has to be right, and adding another fixed walker-type
+// constellation (e.g. a different GNSS baseline) is a new spec object rather than a
+// new copy of the loop.
+export function walkerDelta({ planes, satellitesPerPlane, radius, inclinationDeg, phaseOffset = 0, F = 1 }) {
   const total = planes * satellitesPerPlane, sats = [];
   for (let p = 0; p < planes; p++) for (let s = 0; s < satellitesPerPlane; s++) {
     sats.push({ plane: p, index: p * satellitesPerPlane + s, radius, inclination: inclinationDeg * RAD,
-      raan: TAU * p / planes, phase: TAU * s / satellitesPerPlane + TAU * p / total + phaseOffset });
+      raan: TAU * p / planes, phase: TAU * s / satellitesPerPlane + TAU * F * p / total + phaseOffset });
   }
   return sats;
 }
@@ -120,7 +126,7 @@ function buildRegionalReference(spec) {
 export function buildConstellations(config) {
   const cfg = validateConfig(config), out = [];
   for (const sat of walkerDelta({ planes: cfg.planes, satellitesPerPlane: cfg.satellitesPerPlane,
-    radius: EARTH_RADIUS + cfg.altitude, inclinationDeg: cfg.inclination })) {
+    radius: EARTH_RADIUS + cfg.altitude, inclinationDeg: cfg.inclination, F: cfg.walkerF })) {
     const i = sat.index;
     const payload = cfg.leoNav && Math.floor((i + 1) * cfg.payloadPercent / 100 + 1e-9) > Math.floor(i * cfg.payloadPercent / 100 + 1e-9);
     out.push({ id: 'L' + String(i + 1).padStart(3, '0'), group: 'LEO', plane: sat.plane, payload,
