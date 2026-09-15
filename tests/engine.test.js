@@ -164,6 +164,31 @@ test('location must be a string, even when an input coerces to a known location'
 test('24-hour summary counts unavailable samples and excludes them only from conditional medians', () => {
   const samples=[{minutes:0,rate:200,hrms:2,baseline:4,gnssLEO:2,navPass:true,commPass:true,jointPass:true,leoVisible:4},{minutes:5,rate:0,hrms:null,baseline:null,gnssLEO:null,navPass:false,commPass:false,jointPass:false,leoVisible:0}];
   const sum=summarize(samples,cfg);close(sum.jointAvailability,50);close(sum.medianHrms,2);close(sum.validNavAvailability,50);assert.equal(sum.minLEO,0);
+  assert.equal(sum.longestOutageMinutes, 5); // one 5-minute-step sample missed the joint target
+});
+
+test('summarize tracks the minimum visible LEO nav satellite count and the longest joint-target outage', () => {
+  const sample = (minutes, jointPass, leoVisible) => ({ minutes, rate: jointPass ? 200 : 0, hrms: jointPass ? 2 : null,
+    baseline: 4, gnssLEO: 2, navPass: jointPass, commPass: jointPass, jointPass, leoVisible });
+  // pass, pass, FAIL, FAIL, FAIL, pass, FAIL, pass -> longest run of misses is 3 samples * 5 min = 15 min.
+  const pattern = [true, true, false, false, false, true, false, true];
+  const samples = pattern.map((ok, i) => sample(i * 5, ok, ok ? 8 : 2));
+  const sum = summarize(samples, cfg);
+  assert.equal(sum.minLEO, 2);
+  assert.equal(sum.maxLEO, 8);
+  assert.equal(sum.longestOutageMinutes, 15);
+});
+
+test('summarize reports no outage when every sample meets the joint target', () => {
+  const samples = Array.from({ length: 6 }, (_, i) => ({ minutes: i * 5, rate: 200, hrms: 2, baseline: 4, gnssLEO: 2,
+    navPass: true, commPass: true, jointPass: true, leoVisible: 6 }));
+  const sum = summarize(samples, cfg);
+  assert.equal(sum.longestOutageMinutes, 0);
+});
+
+test('summarize leaves longestOutageMinutes null when the sampling step is unknown (0 or 1 samples)', () => {
+  assert.equal(summarize([], cfg).longestOutageMinutes, null);
+  assert.equal(summarize([{ minutes: 0, rate: 0, hrms: null, baseline: null, gnssLEO: null, navPass: false, commPass: false, jointPass: false, leoVisible: 0 }], cfg).longestOutageMinutes, null);
 });
 
 test('custom coordinates reproduce each preset at the same position', () => {

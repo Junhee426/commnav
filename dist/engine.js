@@ -275,16 +275,28 @@ export function quantile(values, q) {
   const at = (valid.length - 1) * q, lo = Math.floor(at), hi = Math.ceil(at);
   return valid[lo] + (valid[hi] - valid[lo]) * (at - lo);
 }
+// Longest run of consecutive samples matching `predicate`, in sample count (not minutes: the
+// caller multiplies by the sampling step, since this has no notion of sample spacing).
+function longestRun(samples, predicate) {
+  let longest = 0, current = 0;
+  for (const s of samples) { current = predicate(s) ? current + 1 : 0; if (current > longest) longest = current; }
+  return longest;
+}
 export function summarize(samples, config) {
   const count = samples.length, ratio = fn => count ? 100 * samples.filter(fn).length / count : 0;
-  return { samples: count, stepMinutes: samples.length > 1 ? samples[1].minutes - samples[0].minutes : null,
+  const step = samples.length > 1 ? samples[1].minutes - samples[0].minutes : null;
+  return { samples: count, stepMinutes: step,
     medianRate: quantile(samples.map(s => s.rate), .5), medianHrms: quantile(samples.map(s => s.hrms), .5),
     medianBaseline: quantile(samples.map(s => s.baseline), .5), medianGnssLEO: quantile(samples.map(s => s.gnssLEO), .5),
     commAvailability: ratio(s => s.commPass), navAvailability: ratio(s => s.navPass), jointAvailability: ratio(s => s.jointPass),
     baselineAvailability: ratio(s => s.baseline !== null && s.baseline <= config.horizontalTarget),
     gnssLeoAvailability: ratio(s => s.gnssLEO !== null && s.gnssLEO <= config.horizontalTarget),
     validNavAvailability: ratio(s => s.hrms !== null),
-    minLEO: Math.min(...samples.map(s => s.leoVisible)), maxLEO: Math.max(...samples.map(s => s.leoVisible)) };
+    minLEO: Math.min(...samples.map(s => s.leoVisible)), maxLEO: Math.max(...samples.map(s => s.leoVisible)),
+    // Longest unbroken stretch of samples that missed the joint comm+nav target, i.e. the
+    // longest predicted service dropout at this 5-minute sample resolution (a gap shorter than
+    // one step can still fall entirely between two passing samples and go undetected).
+    longestOutageMinutes: step === null ? null : longestRun(samples, s => !s.jointPass) * step };
 }
 export function resourceSweep(config, minutes) {
   return parameterSweep(config, minutes, 'navShare');

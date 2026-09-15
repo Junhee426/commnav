@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, MODEL_VERSION } from './engine.js';
+import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, MODEL_VERSION, EARTH_RADIUS, GNSS_REFERENCE, REGIONAL_REFERENCE } from './engine.js';
 import { Globe, skyPlot, lineChart } from './rendering.js';
 
 const $ = id => document.getElementById(id);
@@ -198,6 +198,7 @@ function renderAnalysis() {
   if (!lastAnalysis) return;
   const { samples, summary: sum, config: used } = lastAnalysis;
   metric('joint-availability', sum.jointAvailability, '%'); metric('comm-availability', sum.commAvailability, '%'); metric('nav-availability', sum.navAvailability, '%');
+  metric('min-leo-visible', sum.minLEO, '기', 0); metric('longest-outage', sum.longestOutageMinutes ?? 0, '분', 0);
   text('rate-target-note', '≥ ' + used.rateTarget + ' Mbps'); text('nav-target-note', '수평 RMS ≤ ' + used.horizontalTarget + ' m');
   const points = samples.map(s => ({ ...s, hours: s.minutes / 60 }));
   lineChart($('navigation-chart'), points, [{ key: 'baseline', color: '#8d9fbb', width: 1.5 }, { key: 'hrms', color: '#48d4f0' }], { threshold: used.horizontalTarget, yLabel: '수평 RMS (m)', title: '24시간 GNSS 단독과 선택한 항법 구성의 예측 위치오차' });
@@ -242,12 +243,31 @@ new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout((
 
 function downloadCSV() {
   if (!lastAnalysis) return;
-  const used = lastAnalysis.config;
+  const used = lastAnalysis.config, sum = lastAnalysis.summary;
   const headers = ['model_version', 'elapsed_minutes', 'downlink_mbps', 'fusion_horizontal_rms_m', 'gnss_horizontal_rms_m', 'gnss_leo_horizontal_rms_m', 'fusion_pdop', 'one_way_delay_ms', 'comm_visible_leo', 'navigation_leo', 'navigation_gnss', 'navigation_regional', 'comm_target_met', 'nav_target_met', 'joint_targets_met', 'scenario_config_json'];
   const quote = value => '"' + String(value ?? '').replaceAll('"', '""') + '"';
   const usedJSON = JSON.stringify(used); // identical for every sample row; stringify once instead of per row (288 samples/day today, more if sampling gets finer)
   const rows = lastAnalysis.samples.map(s => [MODEL_VERSION, s.minutes, s.rate, s.hrms, s.baseline, s.gnssLEO, s.pdop, s.delayMs, s.commVisible, s.leoVisible, s.gnssVisible, s.regionalVisible, s.commPass, s.navPass, s.jointPass, usedJSON]);
-  const csv = '\ufeff' + [headers, ...rows].map(row => row.map(quote).join(',')).join('\r\n');
+  // A metadata preamble (comment lines starting with '#', a convention most CSV readers can skip,
+  // e.g. pandas' `read_csv(..., comment='#')`) so the export is self-describing on its own: the
+  // fixed model assumptions this run used (not part of `scenario_config_json`, which only covers
+  // user-adjustable settings) plus the run's summary stats, not just the per-sample columns below.
+  const meta = [
+    'KLEO COMM/PNT export metadata',
+    'generated_at: ' + new Date().toISOString(),
+    'model_version: ' + MODEL_VERSION,
+    'assumption: circular orbits, two-body dynamics, spherical Earth (radius ' + EARTH_RADIUS + ' km), Earth rotation angle 0 at reference epoch, no TLE or live ephemerides',
+    'gnss_reference: planes=' + GNSS_REFERENCE.planes + ' satellites_per_plane=' + GNSS_REFERENCE.satellitesPerPlane + ' altitude_km=' + GNSS_REFERENCE.altitudeKm + ' inclination_deg=' + GNSS_REFERENCE.inclinationDeg,
+    'regional_reference_used: ' + used.regional,
+    ...(used.regional ? ['regional_reference: geo_count=' + REGIONAL_REFERENCE.geoCount + ' igso_count=' + REGIONAL_REFERENCE.igsoCount + ' igso_inclination_deg=' + REGIONAL_REFERENCE.igsoInclinationDeg] : []),
+    'samples: ' + sum.samples + ' step_minutes: ' + sum.stepMinutes,
+    'joint_availability_pct: ' + sum.jointAvailability.toFixed(2),
+    'comm_availability_pct: ' + sum.commAvailability.toFixed(2),
+    'nav_availability_pct: ' + sum.navAvailability.toFixed(2),
+    'min_visible_leo_nav_satellites: ' + sum.minLEO,
+    'longest_outage_minutes: ' + (sum.longestOutageMinutes ?? ''),
+  ].map(line => '#' + line);
+  const csv = '\ufeff' + [...meta, '', headers, ...rows].map(row => Array.isArray(row) ? row.map(quote).join(',') : row).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
   const a = document.createElement('a'); a.href = url; a.download = 'KLEO_COMM_PNT_' + used.location + '_24h.csv'; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);

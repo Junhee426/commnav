@@ -290,11 +290,17 @@ test('CSV export writes one row per sample and reuses the same scenario JSON for
   assert.ok(anchor.href.startsWith('blob:'));
   const csv = await (await fetch(anchor.href)).text();
   const lines = csv.replace(/^﻿/, '').split('\r\n').filter(Boolean);
+  const metaLines = lines.filter(l => l.startsWith('#'));
+  const dataLines = lines.filter(l => !l.startsWith('#'));
+  assert.ok(metaLines.some(l => /^#generated_at: \d{4}-\d{2}-\d{2}T/.test(l)), 'metadata preamble must include a generation timestamp');
+  assert.ok(metaLines.some(l => l === '#model_version: ' + engine.MODEL_VERSION));
+  assert.ok(metaLines.some(l => /^#min_visible_leo_nav_satellites: \d+$/.test(l)));
+  assert.ok(metaLines.some(l => /^#longest_outage_minutes: /.test(l)));
   const parseRow = line => [...line.matchAll(/"((?:[^"]|"")*)"/g)].map(m => m[1].replaceAll('""', '"'));
-  const header = parseRow(lines[0]);
+  const header = parseRow(dataLines[0]);
   assert.equal(header[0], 'model_version');
   assert.equal(header.at(-1), 'scenario_config_json');
-  const dataRows = lines.slice(1).map(parseRow);
+  const dataRows = dataLines.slice(1).map(parseRow);
   assert.equal(dataRows.length, 1); // the fake worker in this harness returns exactly one sample
   const configs = dataRows.map(row => JSON.parse(row.at(-1)));
   assert.ok(configs.every(cfg => cfg.altitude === workers[1].request.config.altitude), 'every row must carry the same scenario config that produced it');
