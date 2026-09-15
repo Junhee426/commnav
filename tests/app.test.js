@@ -48,6 +48,7 @@ function startApp(options = {}) {
   form.elements = Object.fromEntries(fields.map(field => [field.dataset.config, field]));
   const workers = [];
   const centers = [];
+  const lineCharts = [];
   class Worker {
     constructor() { workers.push(this); }
     postMessage(message) { this.request = message; }
@@ -85,7 +86,7 @@ function startApp(options = {}) {
     window: { matchMedia: () => ({ matches: false }) },
     location, history, navigator,
     Globe: class { set() {} center(lat, lon) { centers.push([lat, lon]); } draw() {} },
-    skyPlot() {}, lineChart() {},
+    skyPlot() {}, lineChart: (...args) => lineCharts.push(args),
     ResizeObserver: class { observe() {} },
     Worker, URL, Blob, setTimeout, clearTimeout, setInterval, clearInterval,
   });
@@ -95,7 +96,7 @@ function startApp(options = {}) {
     assert.equal(event.defaultPrevented, true, 'form submission must not reload the page');
   };
   const click = id => get(id).dispatchEvent(new Event('click'));
-  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard, createdElements };
+  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard, createdElements, lineCharts };
 }
 
 test('submitting settings reruns analysis with the latest input and opens the results', () => {
@@ -246,6 +247,37 @@ test('switching the sweep axis updates the trade-study intro text', () => {
   workers[1].complete();
 });
 
+test('changing navShare invalidates the cached altitude sweep instead of serving stale points', () => {
+  const { get, form, workers, submit, lineCharts } = startApp();
+  workers[0].complete();
+  form.elements.sharing.value = 'time';
+  form.elements.navShare.value = '0';
+  submit();
+  workers[1].complete();
+  get('sweep-axis').value = 'altitude';
+  get('sweep-axis').dispatchEvent(new Event('change'));
+  const rateChartEl = get('resource-rate-chart');
+  const latestRatePoints = () => lineCharts.filter(call => call[0] === rateChartEl).at(-1)[1];
+
+  const before = latestRatePoints();
+  assert.equal(before.length, 17);
+  assert.ok(before.every(p => !p.unavailable), 'all 17 altitude sweep points should be available');
+  assert.equal(before[0].altitude, 400);
+  assert.ok(Math.abs(before[0].rate - 345.987) < 0.01, `expected ~345.987 Mbps at navShare=0, got ${before[0].rate}`);
+
+  form.elements.navShare.value = '40';
+  submit();
+
+  const after = latestRatePoints();
+  assert.notStrictEqual(after, before, 'the altitude sweep must be recalculated, not served from stale cache');
+  assert.equal(after.length, 17);
+  assert.ok(after.every(p => !p.unavailable), 'all 17 altitude sweep points should be recalculated and available');
+  assert.equal(after[0].altitude, 400);
+  assert.ok(Math.abs(after[0].rate - 207.592) < 0.01, `expected ~207.592 Mbps at navShare=40, got ${after[0].rate}`);
+
+  workers[2].complete();
+});
+
 test('CSV export writes one row per sample and reuses the same scenario JSON for every row', async () => {
   const { workers, submit, click, createdElements } = startApp();
   workers[0].complete();
@@ -258,11 +290,17 @@ test('CSV export writes one row per sample and reuses the same scenario JSON for
   assert.ok(anchor.href.startsWith('blob:'));
   const csv = await (await fetch(anchor.href)).text();
   const lines = csv.replace(/^﻿/, '').split('\r\n').filter(Boolean);
+  const metaLines = lines.filter(l => l.startsWith('#'));
+  const dataLines = lines.filter(l => !l.startsWith('#'));
+  assert.ok(metaLines.some(l => /^#generated_at: \d{4}-\d{2}-\d{2}T/.test(l)), 'metadata preamble must include a generation timestamp');
+  assert.ok(metaLines.some(l => l === '#model_version: ' + engine.MODEL_VERSION));
+  assert.ok(metaLines.some(l => /^#min_visible_leo_nav_satellites: \d+$/.test(l)));
+  assert.ok(metaLines.some(l => /^#longest_outage_minutes: /.test(l)));
   const parseRow = line => [...line.matchAll(/"((?:[^"]|"")*)"/g)].map(m => m[1].replaceAll('""', '"'));
-  const header = parseRow(lines[0]);
+  const header = parseRow(dataLines[0]);
   assert.equal(header[0], 'model_version');
   assert.equal(header.at(-1), 'scenario_config_json');
-  const dataRows = lines.slice(1).map(parseRow);
+  const dataRows = dataLines.slice(1).map(parseRow);
   assert.equal(dataRows.length, 1); // the fake worker in this harness returns exactly one sample
   const configs = dataRows.map(row => JSON.parse(row.at(-1)));
   assert.ok(configs.every(cfg => cfg.altitude === workers[1].request.config.altitude), 'every row must carry the same scenario config that produced it');

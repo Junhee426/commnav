@@ -33,6 +33,7 @@
             <label class="field"><span>경사각 <small>°</small></span><input name="inclination" data-config="inclination" type="number" min="0" max="90" step="1" value="42"></label>
           </div>
           <label class="field"><span>궤도면당 위성 수 <small>기</small></span><input name="satellitesPerPlane" data-config="satellitesPerPlane" type="number" min="4" max="32" step="1" value="16" aria-describedby="constellation-note"></label>
+          <label class="field"><span>Walker 위상 계수 F</span><input name="walkerF" data-config="walkerF" type="number" min="0" max="31" step="1" value="1" aria-describedby="constellation-note"></label>
           <label class="field"><span>관측지</span><select name="location" data-config="location"><option value="seoul">서울 · 대한민국</option><option value="busan">부산 · 대한민국</option><option value="jeju">제주 · 대한민국</option><option value="abudhabi">아부다비 · UAE</option><option value="singapore">싱가포르</option><option value="jakarta">자카르타 · 인도네시아</option><option value="custom">위도·경도 직접 입력</option></select></label>
           <div id="custom-location" hidden>
             <div class="field-pair">
@@ -46,7 +47,7 @@
             <label class="field"><span>항법 최소고도각 <small>°</small></span><input name="navElevation" data-config="navElevation" type="number" min="5" max="60" step="1" value="10"></label>
           </div>
           <p id="constellation-note" class="field-note" aria-live="polite">16면 × 면당 16기 = 총 256기 · Walker Delta F=1</p>
-          <p class="field-note">궤도면 1–32개, 면당 4–32기 · 총 512기까지</p>
+          <p class="field-note">궤도면 1–32개, 면당 4–32기 · 총 512기까지 · 위상 계수 F는 0–31의 정수</p>
         </section>
         <section class="control-section">
           <h2><span>02</span> 항법 구성과 자원</h2>
@@ -85,6 +86,11 @@
             <label class="field"><span>수평 RMS 목표 <small>m 이하</small></span><input name="horizontalTarget" data-config="horizontalTarget" type="number" min="0.1" max="100" step="0.1" value="10"></label>
             <label class="field"><span>통신 목표 <small>Mbps 이상</small></span><input name="rateTarget" data-config="rateTarget" type="number" min="1" max="1000" step="1" value="100"></label>
           </div>
+          <div class="field-pair">
+            <label class="field"><span>분석 기간 <small>분</small></span><input name="periodMinutes" data-config="periodMinutes" type="number" min="5" max="1440" step="5" value="1440" aria-describedby="period-note"></label>
+            <label class="field"><span>표본 간격 <small>분</small></span><input name="stepMinutes" data-config="stepMinutes" type="number" min="1" max="60" step="1" value="5" aria-describedby="period-note"></label>
+          </div>
+          <p id="period-note" class="field-note">분석 기간은 표본 간격으로 나누어 떨어져야 하며, 최대 1,440분(24시간)까지입니다. 기본값은 24시간·5분 간격(288개 표본)입니다.</p>
         </details>
         <div id="config-error" class="error-box" role="alert" hidden></div>
         <div class="run-controls"><button id="run-analysis" class="button primary" type="submit">24시간 비교 분석</button><span id="run-status" class="field-note" aria-live="polite">5분 간격 · 288개 표본</span><progress id="analysis-progress" max="100" value="0" hidden aria-label="분석 진행률"></progress></div>
@@ -119,7 +125,7 @@
       <section id="analysis" role="tabpanel" aria-labelledby="tab-analysis" hidden>
         <div class="workspace-heading"><div><p class="eyebrow">PERFORMANCE STUDY</p><h2>통신·항법 성능 비교</h2></div><button id="export-csv" class="button" type="button" disabled>결과 CSV</button></div>
         <div id="analysis-note" class="analysis-note" aria-live="polite">기본 시나리오의 24시간 성능을 계산하고 있습니다.</div>
-        <div class="metrics analysis-metrics"><article class="metric"><span>동시 목표 충족률</span><strong id="joint-availability">— <small>%</small></strong><p>통신·항법 조건을 함께 충족한 표본</p></article><article class="metric"><span>통신 목표 충족률</span><strong id="comm-availability">— <small>%</small></strong><p id="rate-target-note">≥ 100 Mbps</p></article><article class="metric"><span>항법 목표 충족률</span><strong id="nav-availability">— <small>%</small></strong><p id="nav-target-note">수평 RMS ≤ 10 m</p></article></div>
+        <div class="metrics analysis-metrics"><article class="metric"><span>동시 목표 충족률</span><strong id="joint-availability">— <small>%</small></strong><p>통신·항법 조건을 함께 충족한 표본</p></article><article class="metric"><span>통신 목표 충족률</span><strong id="comm-availability">— <small>%</small></strong><p id="rate-target-note">≥ 100 Mbps</p></article><article class="metric"><span>항법 목표 충족률</span><strong id="nav-availability">— <small>%</small></strong><p id="nav-target-note">수평 RMS ≤ 10 m</p></article><article class="metric"><span>최소 가시 LEO 항법위성</span><strong id="min-leo-visible">— <small>기</small></strong><p>24시간 중 최솟값</p></article><article class="metric"><span>최장 서비스 중단</span><strong id="longest-outage">— <small>분</small></strong><p>동시 목표를 놓친 최장 연속 구간(5분 표본 해상도)</p></article></div>
         <div class="analysis-charts"><section class="panel"><div class="panel-heading"><h3>시간별 위치오차</h3><span class="small-value">예측 수평 RMS</span></div><div class="chart-legend"><span><i class="line baseline"></i>GNSS 단독</span><span><i class="line leo"></i>선택한 항법 구성</span></div><div id="navigation-chart" class="chart"></div><p class="chart-note">공백은 측위 불가 구간입니다. 점선은 수평 RMS 목표입니다.</p></section><section class="panel"><div class="panel-heading"><h3>시간별 통신 처리량</h3><span class="small-value">최선의 단일 링크</span></div><div class="chart-legend"><span><i class="line comm"></i>추정 처리량</span><span>점선: 통신 목표</span></div><div id="communication-chart" class="chart"></div><p class="chart-note">가시 LEO가 없으면 0 Mbps로 계산합니다.</p></section></div>
         <section class="panel comparison-panel"><div class="panel-heading"><h3>항법 구성별 비교</h3><span id="comparison-context" class="small-value">같은 위성 배치·오차 가정</span></div><div class="table-scroll"><table><thead><tr><th scope="col">항법 구성</th><th scope="col">수평 RMS 중앙값</th><th scope="col">항법 목표 충족률</th></tr></thead><tbody id="comparison-rows"><tr><td colspan="3">분석 중</td></tr></tbody></table></div><p class="chart-note">중앙값은 측위 가능한 표본에서 계산합니다. 충족률에는 측위 불가 표본도 포함합니다.</p></section>
         <section class="panel resource-panel"><div class="panel-heading"><h3>설계변수를 바꾸면</h3><span id="sweep-context" class="small-value">현재 배치 · 시간 공유 가정</span></div><p class="resource-intro" id="sweep-intro">현재 입력값을 유지하고 항법 시간을 0–40%로 변경한 비교입니다. 신호 분리 모드에서도 시간 공유 전환 시의 변화를 보여줍니다.</p><label class="sweep-axis-label" for="sweep-axis">스윕 변수 <select id="sweep-axis"><option value="navShare">항법 배정시간</option><option value="altitude">궤도 고도</option><option value="inclination">궤도 경사각</option><option value="planes">궤도면 수</option><option value="satellitesPerPlane">면당 위성 수</option><option value="payloadPercent">항법 탑재 비율</option></select></label><div class="analysis-charts"><div><h4>통신 처리량</h4><div id="resource-rate-chart" class="chart"></div></div><div><h4>예측 수평 RMS</h4><div id="resource-nav-chart" class="chart"></div></div></div><p class="chart-note">신호 공유 시 항법 탑재 위성의 통신 시간을 차감합니다. 실제 파형·수신기 성능 검증은 포함하지 않습니다.</p></section>
@@ -130,7 +136,7 @@
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="dialog-heading"><div><p class="eyebrow">MODEL NOTES</p><h2 id="model-title">계산모델과 해석 범위</h2></div><button id="close-model" type="button" class="button small">닫기</button></div>
     <div class="model-content">
-      <h3>위성군과 시각</h3><p>LEO는 원궤도 Walker Delta(F=1), GNSS는 고도 20,200 km·경사각 55°·6면×4기의 가상 기준군입니다. 기준시각의 지구 회전각을 0으로 두며 TLE·실제 달력시각을 사용하지 않습니다. 지구 반경 6,378.137 km의 구형 지구와 2체 궤도·지구 자전을 적용합니다.</p>
+      <h3>위성군과 시각</h3><p>LEO는 원궤도 Walker Delta(위상 계수 F, 기본값 1이며 사용자 설정 가능), GNSS는 고도 20,200 km·경사각 55°·6면×4기·F=1의 가상 기준군입니다. 기준시각의 지구 회전각을 0으로 두며 TLE·실제 달력시각을 사용하지 않습니다. 지구 반경 6,378.137 km의 구형 지구와 2체 궤도·지구 자전을 적용합니다.</p>
       <p>지역항법 옵션은 GEO 경도 120°/128°/136°, IGSO 중심경도 128°·경사각 43°의 설명용 8기 배치입니다. 공식 KPS 설계궤도·성능값을 나타내지 않습니다.</p>
       <h3>항법 오차</h3><p>위성별 거리측정에 가중최소제곱 공분산을 적용합니다. 수신기 위치 3축과 각 항법망의 공통 시각차를 함께 추정합니다. 위성이 부족하거나 기하행렬이 불안정하면 ‘측위 불가’로 처리합니다.</p>
       <p>수평 RMS는 동·북 위치오차 분산 합의 제곱근입니다. 95% 신뢰반경이나 실제 측정오차를 뜻하지 않습니다. PDOP는 거리오차와 구분되는 기하학적 지표이며, 여기서는 항법망별 시각차를 포함한 모형을 사용합니다.</p>
