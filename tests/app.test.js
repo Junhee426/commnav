@@ -48,6 +48,7 @@ function startApp(options = {}) {
   form.elements = Object.fromEntries(fields.map(field => [field.dataset.config, field]));
   const workers = [];
   const centers = [];
+  const lineCharts = [];
   class Worker {
     constructor() { workers.push(this); }
     postMessage(message) { this.request = message; }
@@ -85,7 +86,7 @@ function startApp(options = {}) {
     window: { matchMedia: () => ({ matches: false }) },
     location, history, navigator,
     Globe: class { set() {} center(lat, lon) { centers.push([lat, lon]); } draw() {} },
-    skyPlot() {}, lineChart() {},
+    skyPlot() {}, lineChart: (...args) => lineCharts.push(args),
     ResizeObserver: class { observe() {} },
     Worker, URL, Blob, setTimeout, clearTimeout, setInterval, clearInterval,
   });
@@ -95,7 +96,7 @@ function startApp(options = {}) {
     assert.equal(event.defaultPrevented, true, 'form submission must not reload the page');
   };
   const click = id => get(id).dispatchEvent(new Event('click'));
-  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard, createdElements };
+  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard, createdElements, lineCharts };
 }
 
 test('submitting settings reruns analysis with the latest input and opens the results', () => {
@@ -244,6 +245,37 @@ test('switching the sweep axis updates the trade-study intro text', () => {
   get('sweep-axis').dispatchEvent(new Event('change'));
   assert.match(get('sweep-intro').textContent, /궤도 고도를 400–2,000 km/);
   workers[1].complete();
+});
+
+test('changing navShare invalidates the cached altitude sweep instead of serving stale points', () => {
+  const { get, form, workers, submit, lineCharts } = startApp();
+  workers[0].complete();
+  form.elements.sharing.value = 'time';
+  form.elements.navShare.value = '0';
+  submit();
+  workers[1].complete();
+  get('sweep-axis').value = 'altitude';
+  get('sweep-axis').dispatchEvent(new Event('change'));
+  const rateChartEl = get('resource-rate-chart');
+  const latestRatePoints = () => lineCharts.filter(call => call[0] === rateChartEl).at(-1)[1];
+
+  const before = latestRatePoints();
+  assert.equal(before.length, 17);
+  assert.ok(before.every(p => !p.unavailable), 'all 17 altitude sweep points should be available');
+  assert.equal(before[0].altitude, 400);
+  assert.ok(Math.abs(before[0].rate - 345.987) < 0.01, `expected ~345.987 Mbps at navShare=0, got ${before[0].rate}`);
+
+  form.elements.navShare.value = '40';
+  submit();
+
+  const after = latestRatePoints();
+  assert.notStrictEqual(after, before, 'the altitude sweep must be recalculated, not served from stale cache');
+  assert.equal(after.length, 17);
+  assert.ok(after.every(p => !p.unavailable), 'all 17 altitude sweep points should be recalculated and available');
+  assert.equal(after[0].altitude, 400);
+  assert.ok(Math.abs(after[0].rate - 207.592) < 0.01, `expected ~207.592 Mbps at navShare=40, got ${after[0].rate}`);
+
+  workers[2].complete();
 });
 
 test('CSV export writes one row per sample and reuses the same scenario JSON for every row', async () => {

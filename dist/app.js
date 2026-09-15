@@ -219,7 +219,12 @@ function renderAnalysis() {
 function renderSweep() {
   if (view !== 'analysis') return;
   // The swept axis itself must not be pinned into the cache key, or every point would collapse to one key.
-  const { sharing, navShare, horizontalTarget, rateTarget, [sweepAxis]: swept, ...sweepConfig } = config;
+  // Sweeping navShare forces sharing='time' internally (see parameterSweep), so sharing can't affect those
+  // results and is safe to drop from the key too. Every other axis leaves sharing and navShare as fixed
+  // inputs that do affect the result, so both must stay in the key or changing either would keep serving
+  // stale cached points for that sweep.
+  const { horizontalTarget, rateTarget, [sweepAxis]: swept, ...sweepConfig } = config;
+  if (sweepAxis === 'navShare') delete sweepConfig.sharing;
   const key = JSON.stringify([sweepConfig, minutes, sweepAxis]);
   if (sweepCache?.key !== key) sweepCache = { key, points: parameterSweep(config, minutes, sweepAxis) };
   drawSweep(sweepCache.points);
