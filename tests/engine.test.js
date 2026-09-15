@@ -81,6 +81,24 @@ test('buildConstellations threads cfg.walkerF into the LEO fleet, leaving the fi
   gnssWithF2.forEach((sat, i) => close(sat.phase, gnssDefault[i].phase));
 });
 
+test('validateConfig enforces periodMinutes/stepMinutes bounds and their divisibility', () => {
+  assert.equal(validateConfig({ ...cfg }).periodMinutes, 1440);
+  assert.equal(validateConfig({ ...cfg }).stepMinutes, 5);
+  assert.equal(validateConfig({ ...cfg, periodMinutes: 60, stepMinutes: 15 }).periodMinutes, 60);
+  assert.equal(validateConfig({ ...cfg, periodMinutes: 5, stepMinutes: 5 }).stepMinutes, 5);
+  // Out of the static [lo, hi] range for each field.
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 1441 }), /periodMinutes/);
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 0 }), /periodMinutes/);
+  assert.throws(() => validateConfig({ ...cfg, stepMinutes: 0 }), /stepMinutes/);
+  assert.throws(() => validateConfig({ ...cfg, stepMinutes: 61 }), /stepMinutes/);
+  // Non-integer minutes.
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 100.5 }), /분석 기간·시간 간격/);
+  assert.throws(() => validateConfig({ ...cfg, stepMinutes: 2.5 }), /분석 기간·시간 간격/);
+  // Must divide evenly, so every sample lands on an exact, evenly spaced grid.
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 100, stepMinutes: 7 }), /나누어 떨어져야/);
+  assert.equal(validateConfig({ ...cfg, periodMinutes: 100, stepMinutes: 10 }).periodMinutes, 100);
+});
+
 test('geostationary example remains fixed in ECEF', () => {
   const orbit=buildConstellations({...cfg,regional:true}).find(o=>o.id==='R1');
   const first=orbitState(orbit,0).position, later=orbitState(orbit,31000).position;

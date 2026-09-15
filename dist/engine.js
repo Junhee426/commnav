@@ -22,6 +22,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   gnssSigma: 3, leoSigma: 1.5, orbitSigma: 1, clockNs: 3,
   eirp: 45, gt: 5, bandwidth: 100, frequency: 20, rainLoss: 4,
   horizontalTarget: 10, rateTarget: 100,
+  periodMinutes: 1440, stepMinutes: 5,
 });
 export function validateConfig(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('설정 형식을 확인해 주세요.');
@@ -35,6 +36,10 @@ export function validateConfig(input) {
     gnssSigma: [0.1, 30], leoSigma: [0.1, 30], orbitSigma: [0, 30], clockNs: [0, 1000],
     eirp: [20, 65], gt: [-10, 30], bandwidth: [1, 500], frequency: [10, 40], rainLoss: [0, 40],
     horizontalTarget: [0.1, 100], rateTarget: [1, 1000],
+    // periodMinutes tops out at 1440 because prepareGeometry() only accepts a time-of-day minute
+    // in [0, 1440] (the model's reference epoch and Earth-rotation-angle-0 assumption are defined
+    // for one day; see README). stepMinutes' upper bound keeps at least a handful of samples.
+    periodMinutes: [5, 1440], stepMinutes: [1, 60],
   };
   for (const [key, [lo, hi]] of Object.entries(limits)) {
     if (typeof cfg[key] !== 'number' || !Number.isFinite(cfg[key]) || cfg[key] < lo || cfg[key] > hi)
@@ -47,6 +52,10 @@ export function validateConfig(input) {
   // a full plane count just relabels each plane's own satellites), so F is left independent of
   // the plane count here rather than clamped to [0, planes): a fixed range keeps validation
   // (and every sweep axis, including planes itself) simple without rejecting otherwise-valid input.
+  if (!Number.isInteger(cfg.periodMinutes) || !Number.isInteger(cfg.stepMinutes))
+    throw new Error('분석 기간·시간 간격은 정수(분)여야 합니다.');
+  if (cfg.periodMinutes % cfg.stepMinutes !== 0)
+    throw new Error('분석 기간(' + cfg.periodMinutes + '분)은 시간 간격(' + cfg.stepMinutes + '분)으로 나누어 떨어져야 합니다.');
   for (const key of ['leoNav', 'regional']) if (typeof cfg[key] !== 'boolean') throw new Error(key + ' 값을 확인해 주세요.');
   if (typeof cfg.location !== 'string' || (cfg.location !== 'custom' && !Object.hasOwn(LOCATIONS, cfg.location))) throw new Error('관측지를 선택해 주세요.');
   if (!['separate', 'time'].includes(cfg.sharing)) throw new Error('신호 공유 방식을 선택해 주세요.');

@@ -86,6 +86,11 @@
             <label class="field"><span>수평 RMS 목표 <small>m 이하</small></span><input name="horizontalTarget" data-config="horizontalTarget" type="number" min="0.1" max="100" step="0.1" value="10"></label>
             <label class="field"><span>통신 목표 <small>Mbps 이상</small></span><input name="rateTarget" data-config="rateTarget" type="number" min="1" max="1000" step="1" value="100"></label>
           </div>
+          <div class="field-pair">
+            <label class="field"><span>분석 기간 <small>분</small></span><input name="periodMinutes" data-config="periodMinutes" type="number" min="5" max="1440" step="5" value="1440" aria-describedby="period-note"></label>
+            <label class="field"><span>표본 간격 <small>분</small></span><input name="stepMinutes" data-config="stepMinutes" type="number" min="1" max="60" step="1" value="5" aria-describedby="period-note"></label>
+          </div>
+          <p id="period-note" class="field-note">분석 기간은 표본 간격으로 나누어 떨어져야 하며, 최대 1,440분(24시간)까지입니다. 기본값은 24시간·5분 간격(288개 표본)입니다.</p>
         </details>
         <div id="config-error" class="error-box" role="alert" hidden></div>
         <div class="run-controls"><button id="run-analysis" class="button primary" type="submit">24시간 비교 분석</button><span id="run-status" class="field-note" aria-live="polite">5분 간격 · 288개 표본</span><progress id="analysis-progress" max="100" value="0" hidden aria-label="분석 진행률"></progress></div>

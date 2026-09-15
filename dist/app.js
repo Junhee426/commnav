@@ -62,11 +62,15 @@ function locationLabel(used) {
   const location = getLocation(used);
   return used.location === 'custom' ? `${location.name} (${location.lat}°, ${location.lon}°)` : location.name;
 }
+// periodMinutes/stepMinutes are user-configurable (default 24h/5min), so status text built from
+// them can't stay a hardcoded '24시간 / 5분 간격 / 288개 표본' or it would misreport a scenario
+// that changed those settings.
+function periodHours(periodMinutes) { return periodMinutes % 60 === 0 ? periodMinutes / 60 + '시간' : periodMinutes + '분'; }
 function updateAnalysisNotice() {
   const note = $('analysis-note');
   note.classList.toggle('stale', !!lastAnalysis && stale());
   if (lastAnalysis && stale()) note.textContent = '설정이 변경되었습니다. 아래 시간별 결과는 이전 설정입니다. ‘24시간 비교 분석’을 다시 실행해 주세요.';
-  else if (lastAnalysis) note.textContent = `${locationLabel(lastAnalysis.config)} · 24시간 / 5분 간격 / 288개 표본 · 원궤도 설계모형`;
+  else if (lastAnalysis) note.textContent = `${locationLabel(lastAnalysis.config)} · ${periodHours(lastAnalysis.config.periodMinutes)} / ${lastAnalysis.config.stepMinutes}분 간격 / ${lastAnalysis.summary.samples}개 표본 · 원궤도 설계모형`;
   else note.textContent = calculating ? '기본 시나리오의 24시간 성능을 계산하고 있습니다.' : '왼쪽 설정에서 24시간 비교 분석을 실행해 주세요.';
 }
 function updateControlLabels() {
@@ -167,7 +171,7 @@ function finishCalculation(error) {
   text('run-analysis', '24시간 비교 분석');
   if (worker) { worker.terminate(); worker = null; }
   if (error) { reportError(error); text('run-status', '계산을 완료하지 못했습니다.'); analysisReject?.(new Error(error)); }
-  else { text('run-status', '완료 · 5분 간격 / 288개 표본'); analysisResolve?.(lastAnalysis); }
+  else { text('run-status', `완료 · ${lastAnalysis.config.stepMinutes}분 간격 / ${lastAnalysis.summary.samples}개 표본`); analysisResolve?.(lastAnalysis); }
   analysisResolve = analysisReject = null;
   updateAnalysisNotice();
 }
@@ -269,7 +273,8 @@ function downloadCSV() {
   ].map(line => '#' + line);
   const csv = '\ufeff' + [...meta, '', headers, ...rows].map(row => Array.isArray(row) ? row.map(quote).join(',') : row).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-  const a = document.createElement('a'); a.href = url; a.download = 'KLEO_COMM_PNT_' + used.location + '_24h.csv'; a.click();
+  const periodTag = used.periodMinutes % 60 === 0 ? used.periodMinutes / 60 + 'h' : used.periodMinutes + 'min';
+  const a = document.createElement('a'); a.href = url; a.download = 'KLEO_COMM_PNT_' + used.location + '_' + periodTag + '.csv'; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 $('export-csv').addEventListener('click', downloadCSV);
