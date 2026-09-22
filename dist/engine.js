@@ -6,6 +6,11 @@ export const EARTH_RATE = 7.292115e-5; // rad/s
 export const C = 299792458; // m/s, exact
 const TAU = 2 * Math.PI;
 const RAD = Math.PI / 180;
+// Canonical satellite-group tags. engine.js and rendering.js both branch on these three
+// strings (constellation membership here, color/marker choice there); importing this
+// instead of retyping 'LEO'/'GNSS'/'REGIONAL' turns a typo into a ReferenceError at
+// parse time rather than a silent mismatch at render time.
+export const GROUPS = Object.freeze({ LEO: 'LEO', GNSS: 'GNSS', REGIONAL: 'REGIONAL' });
 export const LOCATIONS = {
   seoul: { name: '서울', lat: 37.5665, lon: 126.978 },
   busan: { name: '부산', lat: 35.1796, lon: 129.0756 },
@@ -108,11 +113,11 @@ export const REGIONAL_REFERENCE = Object.freeze({
 });
 function buildRegionalReference(spec) {
   const radius = Math.cbrt(MU / (EARTH_RATE * EARTH_RATE)), sats = [];
-  for (let i = 0; i < spec.geoCount; i++) sats.push({ id: 'R' + (i + 1), group: 'REGIONAL', payload: true,
+  for (let i = 0; i < spec.geoCount; i++) sats.push({ id: 'R' + (i + 1), group: GROUPS.REGIONAL, payload: true,
     radius, inclination: 0, raan: (spec.geoStartDeg + i * spec.geoSpacingDeg) * RAD, phase: 0 });
   for (let i = 0; i < spec.igsoCount; i++) {
     const phase = TAU * i / spec.igsoCount;
-    sats.push({ id: 'R' + (i + spec.geoCount + 1), group: 'REGIONAL', payload: true,
+    sats.push({ id: 'R' + (i + spec.geoCount + 1), group: GROUPS.REGIONAL, payload: true,
       radius, inclination: spec.igsoInclinationDeg * RAD, raan: spec.igsoCenterDeg * RAD - phase, phase });
   }
   return sats;
@@ -123,12 +128,12 @@ export function buildConstellations(config) {
     radius: EARTH_RADIUS + cfg.altitude, inclinationDeg: cfg.inclination })) {
     const i = sat.index;
     const payload = cfg.leoNav && Math.floor((i + 1) * cfg.payloadPercent / 100 + 1e-9) > Math.floor(i * cfg.payloadPercent / 100 + 1e-9);
-    out.push({ id: 'L' + String(i + 1).padStart(3, '0'), group: 'LEO', plane: sat.plane, payload,
+    out.push({ id: 'L' + String(i + 1).padStart(3, '0'), group: GROUPS.LEO, plane: sat.plane, payload,
       radius: sat.radius, inclination: sat.inclination, raan: sat.raan, phase: sat.phase });
   }
   for (const sat of walkerDelta({ planes: GNSS_REFERENCE.planes, satellitesPerPlane: GNSS_REFERENCE.satellitesPerPlane,
     radius: EARTH_RADIUS + GNSS_REFERENCE.altitudeKm, inclinationDeg: GNSS_REFERENCE.inclinationDeg, phaseOffset: GNSS_REFERENCE.phaseOffset })) {
-    out.push({ id: GNSS_REFERENCE.idPrefix + String(sat.index + 1).padStart(GNSS_REFERENCE.idDigits, '0'), group: 'GNSS', payload: true,
+    out.push({ id: GNSS_REFERENCE.idPrefix + String(sat.index + 1).padStart(GNSS_REFERENCE.idDigits, '0'), group: GROUPS.GNSS, payload: true,
       radius: sat.radius, inclination: sat.inclination, raan: sat.raan, phase: sat.phase });
   }
   if (cfg.regional) out.push(...buildRegionalReference(REGIONAL_REFERENCE));
@@ -176,6 +181,13 @@ export function positionAccuracy(measurements) {
   if (!groups.length || measurements.length < states) return unavailable('가시 위성 부족');
   const normal = Array.from({ length: states }, () => Array(states).fill(0));
   const geometry = Array.from({ length: states }, () => Array(states).fill(0));
+  // Diagonal-only weighting: each measurement's `weight = 1/sigma^2` is accumulated into the
+  // normal equations independently (no cross term between two different satellites' rows),
+  // which is what lets this loop build H^T R^-1 H incrementally in O(states^2) per measurement
+  // instead of forming the full m x m R matrix. Per-satellite-pair correlated errors (shared
+  // orbit-determination or clock-steering error — see README's "이번에 하지 않은 것"/roadmap) are
+  // NOT representable this way: they need an explicit R with off-diagonal terms, inverted once
+  // over all m measurements, which is a different (and more expensive) algorithm than this one.
   for (const m of measurements) {
     const row = [...m.losENU, ...groups.map(group => group === m.group ? 1 : 0)];
     const weight = 1 / (m.sigma * m.sigma);
@@ -220,15 +232,15 @@ export function evaluateSnapshot(cfg, geometry) {
   let best = null;
   let commVisible = 0, navVisibleLEO = 0, payloadCount = 0;
   for (const seen of geometry.satellites) {
-    if (seen.group === 'LEO' && seen.payload) payloadCount++;
+    if (seen.group === GROUPS.LEO && seen.payload) payloadCount++;
     const sat = { ...seen, sigma: null, navUsed: false };
-    if (sat.group === 'LEO' && seen.elevation >= cfg.commElevation) {
+    if (sat.group === GROUPS.LEO && seen.elevation >= cfg.commElevation) {
       commVisible++;
       sat.link = linkBudget(sat, cfg);
       if (!best || sat.link.mbps > best.link.mbps) best = sat;
     }
     if (seen.elevation >= cfg.navElevation && sat.payload) {
-      if (sat.group === 'LEO') {
+      if (sat.group === GROUPS.LEO) {
         const fraction = cfg.sharing === 'time' ? cfg.navShare / 100 : 0.1;
         if (fraction > 0) {
           const noise = cfg.leoSigma * seen.range / 1000 * Math.sqrt(0.1 / fraction);
@@ -240,8 +252,8 @@ export function evaluateSnapshot(cfg, geometry) {
         const m = { id: sat.id, group: sat.group, losENU: seen.losENU, sigma: sat.sigma };
         sat.navUsed = true;
         measurements.push(m);
-        if (sat.group === 'GNSS') gnss.push(m);
-        else if (sat.group === 'REGIONAL') regional.push(m);
+        if (sat.group === GROUPS.GNSS) gnss.push(m);
+        else if (sat.group === GROUPS.REGIONAL) regional.push(m);
         else leo.push(m);
       }
     }

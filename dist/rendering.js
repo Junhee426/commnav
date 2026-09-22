@@ -1,6 +1,6 @@
-import { EARTH_RADIUS, observerFrame, orbitState } from './engine.js';
+import { EARTH_RADIUS, GROUPS, observerFrame, orbitState } from './engine.js';
 const NS = 'http://www.w3.org/2000/svg';
-const COLORS = { LEO: '#48d4f0', GNSS: '#f6b75b', REGIONAL: '#c1a0ff' };
+const COLORS = { [GROUPS.LEO]: '#48d4f0', [GROUPS.GNSS]: '#f6b75b', [GROUPS.REGIONAL]: '#c1a0ff' };
 const TWO_PI = Math.PI * 2;
 function node(tag, attributes = {}, text) {
   const n = document.createElementNS(NS, tag);
@@ -74,7 +74,7 @@ export class Globe {
     const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
     if (this.canvas.width !== pw || this.canvas.height !== ph) { this.canvas.width = pw; this.canvas.height = ph; }
     const ctx = this.ctx; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
-    const shown = this.orbits.filter(o => this.full || o.group === 'LEO');
+    const shown = this.orbits.filter(o => this.full || o.group === GROUPS.LEO);
     const maxRadius = Math.max(...shown.map(o => o.radius)) / EARTH_RADIUS;
     const radius = Math.min(w * .44, h * .43) / maxRadius;
     const cx = w / 2, cy = h / 2 + 2, frame = observerFrame(this.lat, this.lon);
@@ -85,7 +85,7 @@ export class Globe {
     shown.forEach(o => { const key = o.group + ':' + o.raan.toFixed(6) + ':' + o.inclination.toFixed(6); if (!orbitPlanes.has(key)) orbitPlanes.set(key, o); });
     ctx.lineWidth = .65;
     for (const o of orbitPlanes.values()) {
-      ctx.strokeStyle = o.group === 'LEO' ? 'rgba(72,212,240,.20)' : o.group === 'GNSS' ? 'rgba(246,183,91,.25)' : 'rgba(193,160,255,.26)';
+      ctx.strokeStyle = o.group === GROUPS.LEO ? 'rgba(72,212,240,.20)' : o.group === GROUPS.GNSS ? 'rgba(246,183,91,.25)' : 'rgba(193,160,255,.26)';
       ctx.beginPath(); let prior = false;
       for (let i = 0; i <= 120; i++) {
         const q = project(orbitState(o, this.snapshot.minutes * 60, TWO_PI * i / 120).position);
@@ -103,7 +103,7 @@ export class Globe {
     const obs = project(this.snapshot.observer);
     if (obs.z >= 0) {
       for (const sat of this.snapshot.satellites) {
-        if (sat.group !== 'LEO' || !sat.navUsed) continue;
+        if (sat.group !== GROUPS.LEO || !sat.navUsed) continue;
         const q = project(sat.position); if (!unoccluded(q)) continue;
         ctx.strokeStyle = 'rgba(72,212,240,.45)'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(obs.x, obs.y); ctx.lineTo(q.x, q.y); ctx.stroke();
@@ -114,10 +114,10 @@ export class Globe {
       }
     }
     for (const sat of this.snapshot.satellites) {
-      if (!this.full && sat.group !== 'LEO') continue;
+      if (!this.full && sat.group !== GROUPS.LEO) continue;
       const q = project(sat.position); if (!unoccluded(q)) continue;
       const chosen = sat.id === this.snapshot.best?.id;
-      ctx.globalAlpha = q.z < 0 ? .4 : sat.group === 'LEO' && !sat.navUsed ? .55 : 1;
+      ctx.globalAlpha = q.z < 0 ? .4 : sat.group === GROUPS.LEO && !sat.navUsed ? .55 : 1;
       ctx.fillStyle = chosen ? '#f6b75b' : COLORS[sat.group];
       ctx.beginPath(); ctx.arc(q.x, q.y, chosen ? 4.8 : sat.navUsed ? 3.2 : 1.8, 0, TWO_PI); ctx.fill();
       if (chosen) {
@@ -149,8 +149,8 @@ export function skyPlot(container, snapshot) {
     const a = sat.azimuth * Math.PI / 180, rr = r * (1 - sat.elevation / 90);
     const x = cx + rr * Math.sin(a), y = cy - rr * Math.cos(a);
     let mark;
-    if (sat.group === 'GNSS') mark = node('rect', { x: x - 4, y: y - 4, width: 8, height: 8, rx: 1, fill: COLORS.GNSS });
-    else if (sat.group === 'REGIONAL') mark = node('path', { d: `M${x} ${y-5}L${x+5} ${y}L${x} ${y+5}L${x-5} ${y}Z`, fill: COLORS.REGIONAL });
+    if (sat.group === GROUPS.GNSS) mark = node('rect', { x: x - 4, y: y - 4, width: 8, height: 8, rx: 1, fill: COLORS.GNSS });
+    else if (sat.group === GROUPS.REGIONAL) mark = node('path', { d: `M${x} ${y-5}L${x+5} ${y}L${x} ${y+5}L${x-5} ${y}Z`, fill: COLORS.REGIONAL });
     else mark = node('circle', { cx: x, cy: y, r: 4, fill: COLORS.LEO });
     mark.append(node('title', {}, sat.id + ' · 고도각 ' + sat.elevation.toFixed(1) + '° · ' + sat.range.toFixed(0) + ' km')); svg.append(mark);
     if (sat.id === snapshot.best?.id) svg.append(node('circle', { cx: x, cy: y, r: 8, fill: 'none', stroke: '#fff', 'stroke-width': 1.5 }));
