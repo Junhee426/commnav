@@ -43,6 +43,62 @@ test('the regional reference spec is data, not code: changing it changes the con
   close(stock[REGIONAL_REFERENCE.geoCount].inclination, REGIONAL_REFERENCE.igsoInclinationDeg * Math.PI / 180);
 });
 
+test('walkerDelta defaults to F=1 and honors an explicit phasing factor', () => {
+  const base = { planes: 4, satellitesPerPlane: 6, radius: 7000, inclinationDeg: 45 };
+  const defaultF = walkerDelta(base);
+  const explicitF1 = walkerDelta({ ...base, F: 1 });
+  defaultF.forEach((sat, i) => close(sat.phase, explicitF1[i].phase));
+  // Standard Walker Delta phasing: adjacent-plane phase step is F * 360deg / total.
+  const TAU = 2 * Math.PI, total = base.planes * base.satellitesPerPlane;
+  for (const F of [0, 2, 3]) {
+    const grid = walkerDelta({ ...base, F });
+    const plane0 = grid.find(s => s.plane === 0 && s.index % base.satellitesPerPlane === 0);
+    const plane1 = grid.find(s => s.plane === 1 && s.index % base.satellitesPerPlane === 0);
+    close(((plane1.phase - plane0.phase) % TAU + TAU) % TAU, (TAU * F / total) % TAU);
+  }
+});
+
+test('validateConfig enforces walkerF as an integer within [0, 31], independent of planes', () => {
+  assert.equal(validateConfig({ ...cfg, planes: 8, walkerF: 7 }).walkerF, 7);
+  assert.equal(validateConfig({ ...cfg, planes: 8, walkerF: 0 }).walkerF, 0);
+  assert.equal(validateConfig({ ...cfg, planes: 8, walkerF: 31 }).walkerF, 31);
+  assert.throws(() => validateConfig({ ...cfg, walkerF: 32 }), /walkerF/);
+  assert.throws(() => validateConfig({ ...cfg, walkerF: -1 }), /walkerF/);
+  assert.throws(() => validateConfig({ ...cfg, walkerF: 1.5 }), /위상 계수 F/);
+  // F stays valid even when it numerically exceeds the (unrelated) plane count: F and F+planes
+  // describe geometrically equivalent constellations, so no cross-field rejection is needed.
+  assert.equal(validateConfig({ ...cfg, planes: 2, walkerF: 5 }).walkerF, 5);
+  assert.equal(validateConfig({ ...cfg, planes: 1, walkerF: 1 }).walkerF, 1);
+});
+
+test('buildConstellations threads cfg.walkerF into the LEO fleet, leaving the fixed GNSS reference at its own F', () => {
+  const withF2 = buildConstellations({ ...cfg, planes: 4, satellitesPerPlane: 6, walkerF: 2 }).filter(o => o.group === 'LEO');
+  const viaSpec = walkerDelta({ planes: 4, satellitesPerPlane: 6, radius: EARTH_RADIUS + cfg.altitude, inclinationDeg: cfg.inclination, F: 2 });
+  withF2.forEach((sat, i) => close(sat.phase, viaSpec[i].phase));
+  // GNSS reference ignores the LEO fleet's F entirely: identical to the F=1 default case.
+  const gnssWithF2 = buildConstellations({ ...cfg, walkerF: 2 }).filter(o => o.group === 'GNSS');
+  const gnssDefault = buildConstellations(cfg).filter(o => o.group === 'GNSS');
+  gnssWithF2.forEach((sat, i) => close(sat.phase, gnssDefault[i].phase));
+});
+
+test('validateConfig enforces periodMinutes/stepMinutes bounds and their divisibility', () => {
+  assert.equal(validateConfig({ ...cfg }).periodMinutes, 1440);
+  assert.equal(validateConfig({ ...cfg }).stepMinutes, 5);
+  assert.equal(validateConfig({ ...cfg, periodMinutes: 60, stepMinutes: 15 }).periodMinutes, 60);
+  assert.equal(validateConfig({ ...cfg, periodMinutes: 5, stepMinutes: 5 }).stepMinutes, 5);
+  // Out of the static [lo, hi] range for each field.
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 1441 }), /periodMinutes/);
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 0 }), /periodMinutes/);
+  assert.throws(() => validateConfig({ ...cfg, stepMinutes: 0 }), /stepMinutes/);
+  assert.throws(() => validateConfig({ ...cfg, stepMinutes: 61 }), /stepMinutes/);
+  // Non-integer minutes.
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 100.5 }), /분석 기간·시간 간격/);
+  assert.throws(() => validateConfig({ ...cfg, stepMinutes: 2.5 }), /분석 기간·시간 간격/);
+  // Must divide evenly, so every sample lands on an exact, evenly spaced grid.
+  assert.throws(() => validateConfig({ ...cfg, periodMinutes: 100, stepMinutes: 7 }), /나누어 떨어져야/);
+  assert.equal(validateConfig({ ...cfg, periodMinutes: 100, stepMinutes: 10 }).periodMinutes, 100);
+});
+
 test('geostationary example remains fixed in ECEF', () => {
   const orbit=buildConstellations({...cfg,regional:true}).find(o=>o.id==='R1');
   const first=orbitState(orbit,0).position, later=orbitState(orbit,31000).position;
@@ -126,6 +182,31 @@ test('location must be a string, even when an input coerces to a known location'
 test('24-hour summary counts unavailable samples and excludes them only from conditional medians', () => {
   const samples=[{minutes:0,rate:200,hrms:2,baseline:4,gnssLEO:2,navPass:true,commPass:true,jointPass:true,leoVisible:4},{minutes:5,rate:0,hrms:null,baseline:null,gnssLEO:null,navPass:false,commPass:false,jointPass:false,leoVisible:0}];
   const sum=summarize(samples,cfg);close(sum.jointAvailability,50);close(sum.medianHrms,2);close(sum.validNavAvailability,50);assert.equal(sum.minLEO,0);
+  assert.equal(sum.longestOutageMinutes, 5); // one 5-minute-step sample missed the joint target
+});
+
+test('summarize tracks the minimum visible LEO nav satellite count and the longest joint-target outage', () => {
+  const sample = (minutes, jointPass, leoVisible) => ({ minutes, rate: jointPass ? 200 : 0, hrms: jointPass ? 2 : null,
+    baseline: 4, gnssLEO: 2, navPass: jointPass, commPass: jointPass, jointPass, leoVisible });
+  // pass, pass, FAIL, FAIL, FAIL, pass, FAIL, pass -> longest run of misses is 3 samples * 5 min = 15 min.
+  const pattern = [true, true, false, false, false, true, false, true];
+  const samples = pattern.map((ok, i) => sample(i * 5, ok, ok ? 8 : 2));
+  const sum = summarize(samples, cfg);
+  assert.equal(sum.minLEO, 2);
+  assert.equal(sum.maxLEO, 8);
+  assert.equal(sum.longestOutageMinutes, 15);
+});
+
+test('summarize reports no outage when every sample meets the joint target', () => {
+  const samples = Array.from({ length: 6 }, (_, i) => ({ minutes: i * 5, rate: 200, hrms: 2, baseline: 4, gnssLEO: 2,
+    navPass: true, commPass: true, jointPass: true, leoVisible: 6 }));
+  const sum = summarize(samples, cfg);
+  assert.equal(sum.longestOutageMinutes, 0);
+});
+
+test('summarize leaves longestOutageMinutes null when the sampling step is unknown (0 or 1 samples)', () => {
+  assert.equal(summarize([], cfg).longestOutageMinutes, null);
+  assert.equal(summarize([{ minutes: 0, rate: 0, hrms: null, baseline: null, gnssLEO: null, navPass: false, commPass: false, jointPass: false, leoVisible: 0 }], cfg).longestOutageMinutes, null);
 });
 
 test('custom coordinates reproduce each preset at the same position', () => {

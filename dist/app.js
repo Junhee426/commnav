@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, MODEL_VERSION } from './engine.js';
+import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, MODEL_VERSION, EARTH_RADIUS, GNSS_REFERENCE, REGIONAL_REFERENCE } from './engine.js';
 import { Globe, skyPlot, lineChart } from './rendering.js';
 
 const $ = id => document.getElementById(id);
@@ -25,7 +25,7 @@ const SWEEP_AXIS_META = {
   satellitesPerPlane: { max: 32, label: '면당 위성 수', intro: '현재 입력값을 유지하고 면당 위성 수를 4–32기로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
   payloadPercent: { max: 100, label: '항법 탑재 비율 (%)', intro: '현재 입력값을 유지하고 항법 탑재 위성 비율을 0–100%로 변경한 비교입니다.' },
 };
-const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'leoNav', 'payloadPercent', 'regional'];
+const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'walkerF', 'leoNav', 'payloadPercent', 'regional'];
 const globe = new Globe($('globe'));
 const fields = [...form.querySelectorAll('[data-config]')];
 function syncFieldsToConfig(cfg) {
@@ -62,17 +62,21 @@ function locationLabel(used) {
   const location = getLocation(used);
   return used.location === 'custom' ? `${location.name} (${location.lat}°, ${location.lon}°)` : location.name;
 }
+// periodMinutes/stepMinutes are user-configurable (default 24h/5min), so status text built from
+// them can't stay a hardcoded '24시간 / 5분 간격 / 288개 표본' or it would misreport a scenario
+// that changed those settings.
+function periodHours(periodMinutes) { return periodMinutes % 60 === 0 ? periodMinutes / 60 + '시간' : periodMinutes + '분'; }
 function updateAnalysisNotice() {
   const note = $('analysis-note');
   note.classList.toggle('stale', !!lastAnalysis && stale());
   if (lastAnalysis && stale()) note.textContent = '설정이 변경되었습니다. 아래 시간별 결과는 이전 설정입니다. ‘24시간 비교 분석’을 다시 실행해 주세요.';
-  else if (lastAnalysis) note.textContent = `${locationLabel(lastAnalysis.config)} · 24시간 / 5분 간격 / 288개 표본 · 원궤도 설계모형`;
+  else if (lastAnalysis) note.textContent = `${locationLabel(lastAnalysis.config)} · ${periodHours(lastAnalysis.config.periodMinutes)} / ${lastAnalysis.config.stepMinutes}분 간격 / ${lastAnalysis.summary.samples}개 표본 · 원궤도 설계모형`;
   else note.textContent = calculating ? '기본 시나리오의 24시간 성능을 계산하고 있습니다.' : '왼쪽 설정에서 24시간 비교 분석을 실행해 주세요.';
 }
 function updateControlLabels() {
   $('custom-location').hidden = config.location !== 'custom';
   form.elements.latitude.disabled = form.elements.longitude.disabled = config.location !== 'custom';
-  text('constellation-note', `${config.planes}면 × 면당 ${config.satellitesPerPlane}기 = 총 ${config.planes * config.satellitesPerPlane}기 · Walker Delta F=1`);
+  text('constellation-note', `${config.planes}면 × 면당 ${config.satellitesPerPlane}기 = 총 ${config.planes * config.satellitesPerPlane}기 · Walker Delta F=${config.walkerF}`);
   text('payload-value', config.payloadPercent + '%'); text('share-value', config.navShare + '%');
   const share = form.elements.navShare;
   share.disabled = config.sharing === 'separate' || !config.leoNav || config.payloadPercent === 0;
@@ -167,7 +171,7 @@ function finishCalculation(error) {
   text('run-analysis', '24시간 비교 분석');
   if (worker) { worker.terminate(); worker = null; }
   if (error) { reportError(error); text('run-status', '계산을 완료하지 못했습니다.'); analysisReject?.(new Error(error)); }
-  else { text('run-status', '완료 · 5분 간격 / 288개 표본'); analysisResolve?.(lastAnalysis); }
+  else { text('run-status', `완료 · ${lastAnalysis.config.stepMinutes}분 간격 / ${lastAnalysis.summary.samples}개 표본`); analysisResolve?.(lastAnalysis); }
   analysisResolve = analysisReject = null;
   updateAnalysisNotice();
 }
@@ -198,6 +202,7 @@ function renderAnalysis() {
   if (!lastAnalysis) return;
   const { samples, summary: sum, config: used } = lastAnalysis;
   metric('joint-availability', sum.jointAvailability, '%'); metric('comm-availability', sum.commAvailability, '%'); metric('nav-availability', sum.navAvailability, '%');
+  metric('min-leo-visible', sum.minLEO, '기', 0); metric('longest-outage', sum.longestOutageMinutes ?? 0, '분', 0);
   text('rate-target-note', '≥ ' + used.rateTarget + ' Mbps'); text('nav-target-note', '수평 RMS ≤ ' + used.horizontalTarget + ' m');
   const points = samples.map(s => ({ ...s, hours: s.minutes / 60 }));
   lineChart($('navigation-chart'), points, [{ key: 'baseline', color: '#8d9fbb', width: 1.5 }, { key: 'hrms', color: '#48d4f0' }], { threshold: used.horizontalTarget, yLabel: '수평 RMS (m)', title: '24시간 GNSS 단독과 선택한 항법 구성의 예측 위치오차' });
@@ -219,7 +224,12 @@ function renderAnalysis() {
 function renderSweep() {
   if (view !== 'analysis') return;
   // The swept axis itself must not be pinned into the cache key, or every point would collapse to one key.
-  const { sharing, navShare, horizontalTarget, rateTarget, [sweepAxis]: swept, ...sweepConfig } = config;
+  // Sweeping navShare forces sharing='time' internally (see parameterSweep), so sharing can't affect those
+  // results and is safe to drop from the key too. Every other axis leaves sharing and navShare as fixed
+  // inputs that do affect the result, so both must stay in the key or changing either would keep serving
+  // stale cached points for that sweep.
+  const { horizontalTarget, rateTarget, [sweepAxis]: swept, ...sweepConfig } = config;
+  if (sweepAxis === 'navShare') delete sweepConfig.sharing;
   const key = JSON.stringify([sweepConfig, minutes, sweepAxis]);
   if (sweepCache?.key !== key) sweepCache = { key, points: parameterSweep(config, minutes, sweepAxis) };
   drawSweep(sweepCache.points);
@@ -237,14 +247,34 @@ new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout((
 
 function downloadCSV() {
   if (!lastAnalysis) return;
-  const used = lastAnalysis.config;
+  const used = lastAnalysis.config, sum = lastAnalysis.summary;
   const headers = ['model_version', 'elapsed_minutes', 'downlink_mbps', 'fusion_horizontal_rms_m', 'gnss_horizontal_rms_m', 'gnss_leo_horizontal_rms_m', 'fusion_pdop', 'one_way_delay_ms', 'comm_visible_leo', 'navigation_leo', 'navigation_gnss', 'navigation_regional', 'comm_target_met', 'nav_target_met', 'joint_targets_met', 'scenario_config_json'];
   const quote = value => '"' + String(value ?? '').replaceAll('"', '""') + '"';
   const usedJSON = JSON.stringify(used); // identical for every sample row; stringify once instead of per row (288 samples/day today, more if sampling gets finer)
   const rows = lastAnalysis.samples.map(s => [MODEL_VERSION, s.minutes, s.rate, s.hrms, s.baseline, s.gnssLEO, s.pdop, s.delayMs, s.commVisible, s.leoVisible, s.gnssVisible, s.regionalVisible, s.commPass, s.navPass, s.jointPass, usedJSON]);
-  const csv = '\ufeff' + [headers, ...rows].map(row => row.map(quote).join(',')).join('\r\n');
+  // A metadata preamble (comment lines starting with '#', a convention most CSV readers can skip,
+  // e.g. pandas' `read_csv(..., comment='#')`) so the export is self-describing on its own: the
+  // fixed model assumptions this run used (not part of `scenario_config_json`, which only covers
+  // user-adjustable settings) plus the run's summary stats, not just the per-sample columns below.
+  const meta = [
+    'KLEO COMM/PNT export metadata',
+    'generated_at: ' + new Date().toISOString(),
+    'model_version: ' + MODEL_VERSION,
+    'assumption: circular orbits, two-body dynamics, spherical Earth (radius ' + EARTH_RADIUS + ' km), Earth rotation angle 0 at reference epoch, no TLE or live ephemerides',
+    'gnss_reference: planes=' + GNSS_REFERENCE.planes + ' satellites_per_plane=' + GNSS_REFERENCE.satellitesPerPlane + ' altitude_km=' + GNSS_REFERENCE.altitudeKm + ' inclination_deg=' + GNSS_REFERENCE.inclinationDeg,
+    'regional_reference_used: ' + used.regional,
+    ...(used.regional ? ['regional_reference: geo_count=' + REGIONAL_REFERENCE.geoCount + ' igso_count=' + REGIONAL_REFERENCE.igsoCount + ' igso_inclination_deg=' + REGIONAL_REFERENCE.igsoInclinationDeg] : []),
+    'samples: ' + sum.samples + ' step_minutes: ' + sum.stepMinutes,
+    'joint_availability_pct: ' + sum.jointAvailability.toFixed(2),
+    'comm_availability_pct: ' + sum.commAvailability.toFixed(2),
+    'nav_availability_pct: ' + sum.navAvailability.toFixed(2),
+    'min_visible_leo_nav_satellites: ' + sum.minLEO,
+    'longest_outage_minutes: ' + (sum.longestOutageMinutes ?? ''),
+  ].map(line => '#' + line);
+  const csv = '\ufeff' + [...meta, '', headers, ...rows].map(row => Array.isArray(row) ? row.map(quote).join(',') : row).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-  const a = document.createElement('a'); a.href = url; a.download = 'KLEO_COMM_PNT_' + used.location + '_24h.csv'; a.click();
+  const periodTag = used.periodMinutes % 60 === 0 ? used.periodMinutes / 60 + 'h' : used.periodMinutes + 'min';
+  const a = document.createElement('a'); a.href = url; a.download = 'KLEO_COMM_PNT_' + used.location + '_' + periodTag + '.csv'; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 $('export-csv').addEventListener('click', downloadCSV);
