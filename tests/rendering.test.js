@@ -186,6 +186,19 @@ test('lineChart multi-series charts draw one path per series in matching colors'
   assert.equal(paths[1].attributes['stroke-width'], '1.5');
 });
 
+test('lineChart maps a non-zero xMin to the left edge and labels ticks across [xMin, xMax]', () => {
+  const container = new FakeElement('div'); container._rect = { width: 500, height: 260 };
+  const rows = [400, 1200, 2000].map(altitude => ({ altitude, rate: altitude / 10 }));
+  lineChart(container, rows, [{ key: 'rate', color: '#fff' }], { xMin: 400, xMax: 2000, xKey: 'altitude', xLabel: 'km' });
+  const svg = container.children[0];
+  const coords = svg.children.find(c => c.tagName === 'path').attributes.d.trim().split(/[ML]\s*/).filter(Boolean).map(pair => Number(pair.split(' ')[0]));
+  close(coords[0], 58); // margin.left
+  close(coords[2], 500 - 22); // width - margin.right
+  close(coords[1], (58 + 478) / 2);
+  const ticks = svg.children.filter(c => c.tagName === 'text' && c.attributes.y === String(260 - 21)).map(c => c.textContent);
+  assert.deepEqual(ticks, [400, 800, 1200, 1600, 2000]);
+});
+
 // --- Globe ---
 
 test('Globe.draw is a no-op until a snapshot has been set', () => {

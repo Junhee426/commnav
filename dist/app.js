@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, MODEL_VERSION } from './engine.js';
+import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, SWEEP_SPECS, MODEL_VERSION } from './engine.js';
 import { Globe, skyPlot, lineChart } from './rendering.js';
 
 const $ = id => document.getElementById(id);
@@ -18,12 +18,12 @@ let lastAnalysis = null, worker = null, job = 0, playing = null, calculating = f
 let scheduled = null, analysisResolve = null, analysisReject = null;
 let sweepCache = null, sweepAxis = 'navShare';
 const SWEEP_AXIS_META = {
-  navShare: { max: 40, label: '항법 배정시간 (%)', intro: '현재 입력값을 유지하고 항법 시간을 0–40%로 변경한 비교입니다. 신호 분리 모드에서도 시간 공유 전환 시의 변화를 보여줍니다.' },
-  altitude: { max: 2000, label: '궤도 고도 (km)', intro: '현재 입력값을 유지하고 궤도 고도를 400–2,000 km로 변경한 비교입니다.' },
-  inclination: { max: 90, label: '궤도 경사각 (°)', intro: '현재 입력값을 유지하고 궤도 경사각을 0–90°로 변경한 비교입니다.' },
-  planes: { max: 32, label: '궤도면 수', intro: '현재 입력값을 유지하고 궤도면 수를 1–32개로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
-  satellitesPerPlane: { max: 32, label: '면당 위성 수', intro: '현재 입력값을 유지하고 면당 위성 수를 4–32기로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
-  payloadPercent: { max: 100, label: '항법 탑재 비율 (%)', intro: '현재 입력값을 유지하고 항법 탑재 위성 비율을 0–100%로 변경한 비교입니다.' },
+  navShare: { label: '항법 배정시간 (%)', intro: '현재 입력값을 유지하고 항법 시간을 0–40%로 변경한 비교입니다. 신호 분리 모드에서도 시간 공유 전환 시의 변화를 보여줍니다.' },
+  altitude: { label: '궤도 고도 (km)', intro: '현재 입력값을 유지하고 궤도 고도를 400–2,000 km로 변경한 비교입니다.' },
+  inclination: { label: '궤도 경사각 (°)', intro: '현재 입력값을 유지하고 궤도 경사각을 0–90°로 변경한 비교입니다.' },
+  planes: { label: '궤도면 수', intro: '현재 입력값을 유지하고 궤도면 수를 1–32개로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
+  satellitesPerPlane: { label: '면당 위성 수', intro: '현재 입력값을 유지하고 면당 위성 수를 4–32기로 변경한 비교입니다. 총 위성 수가 512기를 넘는 구간은 표시하지 않습니다.' },
+  payloadPercent: { label: '항법 탑재 비율 (%)', intro: '현재 입력값을 유지하고 항법 탑재 위성 비율을 0–100%로 변경한 비교입니다.' },
 };
 const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'leoNav', 'payloadPercent', 'regional'];
 const globe = new Globe($('globe'));
@@ -218,18 +218,20 @@ function renderAnalysis() {
 }
 function renderSweep() {
   if (view !== 'analysis') return;
-  // The swept axis itself must not be pinned into the cache key, or every point would collapse to one key.
-  const { sharing, navShare, horizontalTarget, rateTarget, [sweepAxis]: swept, ...sweepConfig } = config;
+  // The swept value and the pass/fail targets do not change the sweep. Only the navShare sweep
+  // forces time sharing; every other axis is evaluated with the selected sharing and navShare.
+  const { horizontalTarget, rateTarget, [sweepAxis]: swept, ...sweepConfig } = config;
+  if (sweepAxis === 'navShare') delete sweepConfig.sharing;
   const key = JSON.stringify([sweepConfig, minutes, sweepAxis]);
   if (sweepCache?.key !== key) sweepCache = { key, points: parameterSweep(config, minutes, sweepAxis) };
   drawSweep(sweepCache.points);
 }
 function drawSweep(points) {
-  const meta = SWEEP_AXIS_META[sweepAxis];
+  const meta = SWEEP_AXIS_META[sweepAxis], { min, max } = SWEEP_SPECS[sweepAxis];
   text('sweep-context', 'T + ' + clock(minutes) + ' · 현재 입력값 기준');
   text('sweep-intro', meta.intro);
-  lineChart($('resource-rate-chart'), points, [{ key: 'rate', color: '#f6b75b' }], { xMax: meta.max, xKey: sweepAxis, xLabel: meta.label, yLabel: '처리량 (Mbps)', title: meta.label + '에 따른 통신 처리량' });
-  lineChart($('resource-nav-chart'), points, [{ key: 'hrms', color: '#48d4f0' }], { xMax: meta.max, xKey: sweepAxis, xLabel: meta.label, yLabel: '수평 RMS (m)', title: meta.label + '에 따른 위치오차' });
+  lineChart($('resource-rate-chart'), points, [{ key: 'rate', color: '#f6b75b' }], { xMin: min, xMax: max, xKey: sweepAxis, xLabel: meta.label, yLabel: '처리량 (Mbps)', title: meta.label + '에 따른 통신 처리량' });
+  lineChart($('resource-nav-chart'), points, [{ key: 'hrms', color: '#48d4f0' }], { xMin: min, xMax: max, xKey: sweepAxis, xLabel: meta.label, yLabel: '수평 RMS (m)', title: meta.label + '에 따른 위치오차' });
 }
 $('sweep-axis').addEventListener('change', () => { sweepAxis = $('sweep-axis').value; renderSweep(); });
 let resizeTimer;

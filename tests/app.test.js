@@ -85,7 +85,7 @@ function startApp(options = {}) {
     window: { matchMedia: () => ({ matches: false }) },
     location, history, navigator,
     Globe: class { set() {} center(lat, lon) { centers.push([lat, lon]); } draw() {} },
-    skyPlot() {}, lineChart() {},
+    skyPlot() {}, lineChart: options.lineChart || (() => {}),
     ResizeObserver: class { observe() {} },
     Worker, URL, Blob, setTimeout, clearTimeout, setInterval, clearInterval,
   });
@@ -275,4 +275,24 @@ test('a clipboard failure still updates the address bar and reports the problem'
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(historyCalls.length, 1);
   assert.match(get('share-status').textContent, /실패/);
+});
+
+test('design-variable sweeps are recomputed when navigation time sharing changes', () => {
+  const charts = [];
+  const { get, form, workers, submit } = startApp({ lineChart: (container, points, series, options) => charts.push({ points, options }) });
+  workers[0].complete();
+  form.elements.sharing.value = 'time';
+  get('sweep-axis').value = 'altitude';
+  get('sweep-axis').dispatchEvent(new Event('change'));
+  submit();
+  workers[1].complete();
+  const latestRates = () => charts.filter(c => c.options.xKey === 'altitude' && c.options.yLabel.startsWith('처리량')).at(-1).points.map(p => p.rate);
+  const before = latestRates();
+  assert.ok(before.some(rate => rate > 0), 'the sweep must contain connected points to compare');
+  form.elements.navShare.value = '30';
+  submit();
+  workers[2].complete();
+  const after = latestRates();
+  assert.ok(after.every((rate, i) => rate <= before[i]), 'more navigation time cannot increase downlink throughput');
+  assert.notDeepEqual(after, before, 'a stale sweep must not survive a navigation time-share change');
 });

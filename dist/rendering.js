@@ -165,8 +165,8 @@ export function lineChart(container, points, series, options = {}) {
   svg.append(node('title', {}, options.title || '성능 그래프'));
   if (!all.length) { svg.append(node('text', { x: width/2, y: height/2, 'text-anchor': 'middle', fill: '#a8bad0' }, '이 조건에서는 유효한 측위 결과가 없습니다.')); container.replaceChildren(svg); return; }
   const max = Math.max(...all, options.threshold || 0) * 1.12 || 1;
-  const xMax = options.xMax ?? 24, xKey = options.xKey || 'hours';
-  const x = value => margin.left + value / xMax * (width - margin.left - margin.right);
+  const xMin = options.xMin ?? 0, xMax = options.xMax ?? 24, xKey = options.xKey || 'hours';
+  const x = value => margin.left + (value - xMin) / (xMax - xMin) * (width - margin.left - margin.right);
   const y = value => height - margin.bottom - value / max * (height - margin.top - margin.bottom);
   svg.append(node('text', { x: margin.left, y: 17, fill: '#a8bad0', 'font-size': 13 }, options.yLabel || ''));
   for (let i = 0; i <= 4; i++) {
@@ -176,7 +176,7 @@ export function lineChart(container, points, series, options = {}) {
   }
   const ticks = width < 450 ? 3 : 4;
   for (let i = 0; i <= ticks; i++) {
-    const v = xMax * i / ticks;
+    const v = xMin + (xMax - xMin) * i / ticks;
     svg.append(node('text', { x: x(v), y: height-21, fill: '#92a7c1', 'text-anchor': 'middle', 'font-size': 12 }, options.xLabel ? Math.round(v) : Math.round(v) + 'h'));
   }
   if (options.threshold !== undefined) {
