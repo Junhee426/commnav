@@ -58,9 +58,9 @@ npm test
 - `dist/rendering.js`: 실제 위치 벡터를 투영하는 지구·하늘보기·시간별 그래프
 - `dist/index.html`, `dist/styles.css`: 반응형 한국어 인터페이스
 - `tests/engine.test.js`: 독립 NumPy 결과와의 공분산 비교, 물리적 불변량·오류·퇴화조건 검증
-- `tests/app.test.js`: DOM·Worker 대역을 이용한 분석 재실행, 중복 제출, 입력 오류, 실패 후 재시도 검증
+- `tests/app.test.js`: DOM·Worker 대역을 이용한 분석 재실행, 중복 제출, 입력 오류, 실패 후 재시도, 항법 시간 배분 변경 시 설계 변수 스윕 재계산 검증
 - `tests/worker.test.js`: 사용자 지정 좌표·위성군으로 실제 Worker 계산 코드의 24시간 표본 및 설정 전달 검증
-- `tests/rendering.test.js`: 최소 SVG·캔버스 대역으로 하늘보기·시간별 그래프의 도형·좌표·범례 로직과 지구본의 관측자 투영·표시 범위 전환 검증
+- `tests/rendering.test.js`: 최소 SVG·캔버스 대역으로 하늘보기·시간별 그래프의 도형·좌표·범례 로직, 0이 아닌 x축 시작값, 지구본의 관측자 투영·표시 범위 전환 검증
 - `scripts/verify-static.mjs`: 배포 파일·상대경로·JavaScript 문법 검사
 - `render.yaml`: Render Static Site 배포 설정
 - `RENDER_DEPLOYMENT.md`: 한국어 배포 안내

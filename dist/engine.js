@@ -296,14 +296,14 @@ export function resourceSweep(config, minutes) {
   return parameterSweep(config, minutes, 'navShare');
 }
 // Ranges mirror validateConfig's own limits for each field.
-const SWEEP_SPECS = {
+export const SWEEP_SPECS = Object.freeze({
   navShare: { min: 0, max: 40, steps: 21 },
   altitude: { min: 400, max: 2000, steps: 17 },
   inclination: { min: 0, max: 90, steps: 19 },
   planes: { min: 1, max: 32, steps: 32, integer: true },
   satellitesPerPlane: { min: 4, max: 32, steps: 15, integer: true },
   payloadPercent: { min: 0, max: 100, steps: 21 },
-};
+});
 export const SWEEP_AXES = Object.keys(SWEEP_SPECS);
 function sweepAxisPoints({ min, max, steps, integer }) {
   return Array.from({ length: steps }, (_, i) => {
