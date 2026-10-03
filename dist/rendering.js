@@ -1,4 +1,4 @@
-import { EARTH_RADIUS, GROUPS, observerFrame, orbitState } from './engine.js';
+import { EARTH_RADIUS, GROUPS, observerFrame, orbitState, quantile } from './engine.js';
 const NS = 'http://www.w3.org/2000/svg';
 const COLORS = { [GROUPS.LEO]: '#48d4f0', [GROUPS.GNSS]: '#f6b75b', [GROUPS.REGIONAL]: '#c1a0ff' };
 const TWO_PI = Math.PI * 2;
@@ -164,15 +164,32 @@ export function lineChart(container, points, series, options = {}) {
   const svg = node('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': options.title || '시간별 성능 그래프', class: 'time-chart' });
   svg.append(node('title', {}, options.title || '성능 그래프'));
   if (!all.length) { svg.append(node('text', { x: width/2, y: height/2, 'text-anchor': 'middle', fill: '#a8bad0' }, '이 조건에서는 유효한 측위 결과가 없습니다.')); container.replaceChildren(svg); return; }
-  const max = Math.max(...all, options.threshold || 0) * 1.12 || 1;
+  // Position error can spike by orders of magnitude when the geometry collapses; on a linear axis one
+  // spike flattens every typical value and the target line against zero. yScale 'auto' switches to a
+  // log axis only then, so ordinary charts keep their linear scale.
+  const peak = Math.max(...all, options.threshold || 0) * 1.12;
+  const positive = all.filter(v => v > 0);
+  const log = positive.length > 0 && (options.yScale === 'log' || (options.yScale === 'auto' && positive.length === all.length
+    && Math.max(...all) > 10 * Math.max(options.threshold || 0, quantile(all, .5))));
+  const plotted = v => Number.isFinite(v) && (!log || v > 0);
   const xMin = options.xMin ?? 0, xMax = options.xMax ?? 24, xKey = options.xKey || 'hours';
   const x = value => margin.left + (value - xMin) / (xMax - xMin) * (width - margin.left - margin.right);
-  const y = value => height - margin.bottom - value / max * (height - margin.top - margin.bottom);
-  svg.append(node('text', { x: margin.left, y: 17, fill: '#a8bad0', 'font-size': 13 }, options.yLabel || ''));
-  for (let i = 0; i <= 4; i++) {
-    const v = max * i / 4, py = y(v);
+  const span = height - margin.top - margin.bottom;
+  let y, yTicks;
+  if (log) {
+    const lo = Math.floor(Math.log10(Math.min(...positive, options.threshold || Infinity))), hi = Math.log10(peak);
+    y = value => height - margin.bottom - (Math.log10(value) - lo) / (hi - lo) * span;
+    yTicks = Array.from({ length: Math.floor(hi) - lo + 1 }, (_, i) => ({ value: 10 ** (lo + i), label: String(10 ** (lo + i)) }));
+  } else {
+    const max = peak || 1;
+    y = value => height - margin.bottom - value / max * span;
+    yTicks = [0, 1, 2, 3, 4].map(i => { const v = max * i / 4; return { value: v, label: max > 20 ? Math.round(v) : v.toFixed(1) }; });
+  }
+  svg.append(node('text', { x: margin.left, y: 17, fill: '#a8bad0', 'font-size': 13 }, (options.yLabel || '') + (log ? ' · 로그 축' : '')));
+  for (const tick of yTicks) {
+    const py = y(tick.value);
     svg.append(node('line', { x1: margin.left, x2: width-margin.right, y1: py, y2: py, stroke: '#233348' }));
-    svg.append(node('text', { x: margin.left-9, y: py+4, fill: '#92a7c1', 'text-anchor': 'end', 'font-size': 12 }, max > 20 ? Math.round(v) : v.toFixed(1)));
+    svg.append(node('text', { x: margin.left-9, y: py+4, fill: '#92a7c1', 'text-anchor': 'end', 'font-size': 12 }, tick.label));
   }
   const ticks = width < 450 ? 3 : 4;
   for (let i = 0; i <= ticks; i++) {
@@ -186,7 +203,7 @@ export function lineChart(container, points, series, options = {}) {
     let path = '', open = false;
     for (const p of points) {
       const v = p[s.key];
-      if (!Number.isFinite(v)) { open = false; continue; }
+      if (!plotted(v)) { open = false; continue; }
       path += (open ? 'L' : 'M') + x(p[xKey]).toFixed(2) + ' ' + y(v).toFixed(2) + ' '; open = true;
     }
     svg.append(node('path', { d: path, stroke: s.color, 'stroke-width': s.width || 2, fill: 'none', 'stroke-linejoin': 'round' }));

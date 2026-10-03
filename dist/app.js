@@ -200,7 +200,7 @@ function renderAnalysis() {
   metric('joint-availability', sum.jointAvailability, '%'); metric('comm-availability', sum.commAvailability, '%'); metric('nav-availability', sum.navAvailability, '%');
   text('rate-target-note', '≥ ' + used.rateTarget + ' Mbps'); text('nav-target-note', '수평 RMS ≤ ' + used.horizontalTarget + ' m');
   const points = samples.map(s => ({ ...s, hours: s.minutes / 60 }));
-  lineChart($('navigation-chart'), points, [{ key: 'baseline', color: '#8d9fbb', width: 1.5 }, { key: 'hrms', color: '#48d4f0' }], { threshold: used.horizontalTarget, yLabel: '수평 RMS (m)', title: '24시간 GNSS 단독과 선택한 항법 구성의 예측 위치오차' });
+  lineChart($('navigation-chart'), points, [{ key: 'baseline', color: '#8d9fbb', width: 1.5 }, { key: 'hrms', color: '#48d4f0' }], { threshold: used.horizontalTarget, yScale: 'auto', yLabel: '수평 RMS (m)', title: '24시간 GNSS 단독과 선택한 항법 구성의 예측 위치오차' });
   lineChart($('communication-chart'), points, [{ key: 'rate', color: '#f6b75b' }], { threshold: used.rateTarget, yLabel: '처리량 (Mbps)', title: '24시간 단일 사용자 다운링크 처리량' });
   const rows = [
     { name: 'GNSS 단독', median: sum.medianBaseline, availability: sum.baselineAvailability, selected: !used.leoNav && !used.regional },
@@ -231,7 +231,7 @@ function drawSweep(points) {
   text('sweep-context', 'T + ' + clock(minutes) + ' · 현재 입력값 기준');
   text('sweep-intro', meta.intro);
   lineChart($('resource-rate-chart'), points, [{ key: 'rate', color: '#f6b75b' }], { xMin: min, xMax: max, xKey: sweepAxis, xLabel: meta.label, yLabel: '처리량 (Mbps)', title: meta.label + '에 따른 통신 처리량' });
-  lineChart($('resource-nav-chart'), points, [{ key: 'hrms', color: '#48d4f0' }], { xMin: min, xMax: max, xKey: sweepAxis, xLabel: meta.label, yLabel: '수평 RMS (m)', title: meta.label + '에 따른 위치오차' });
+  lineChart($('resource-nav-chart'), points, [{ key: 'hrms', color: '#48d4f0' }], { xMin: min, xMax: max, xKey: sweepAxis, xLabel: meta.label, yScale: 'auto', yLabel: '수평 RMS (m)', title: meta.label + '에 따른 위치오차' });
 }
 $('sweep-axis').addEventListener('change', () => { sweepAxis = $('sweep-axis').value; renderSweep(); });
 let resizeTimer;
