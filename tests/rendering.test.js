@@ -199,6 +199,24 @@ test('lineChart maps a non-zero xMin to the left edge and labels ticks across [x
   assert.deepEqual(ticks, [400, 800, 1200, 1600, 2000]);
 });
 
+test('lineChart yScale auto switches to a decade log axis only when one spike dwarfs the typical values and target', () => {
+  const spiky = new FakeElement('div'); spiky._rect = { width: 500, height: 260 };
+  lineChart(spiky, points([[0, 2], [6, 3], [12, 1035], [18, 2.5]]), [{ key: 'value', color: '#fff' }], { threshold: 10, yScale: 'auto', yLabel: 'Y' });
+  let svg = spiky.children[0];
+  const label = c => c.tagName === 'text' && c.attributes['text-anchor'] === 'end';
+  assert.deepEqual(svg.children.filter(label).map(c => c.textContent), ['1', '10', '100', '1000']);
+  assert.equal(svg.children.some(c => c.tagName === 'text' && c.textContent === 'Y · 로그 축'), true);
+  // The 10 m target sits a third of the way up (decade 1 of 0..log10(1035 * 1.12)), not flattened against zero.
+  const target = svg.children.find(c => c.tagName === 'line' && c.attributes['stroke-dasharray']);
+  close(Number(target.attributes.y1), 260 - 42 - (1 / Math.log10(1035 * 1.12)) * (260 - 30 - 42), 1e-9);
+
+  const calm = new FakeElement('div'); calm._rect = { width: 500, height: 260 };
+  lineChart(calm, points([[0, 2], [6, 3], [12, 4.6]]), [{ key: 'value', color: '#fff' }], { threshold: 10, yScale: 'auto', yLabel: 'Y' });
+  svg = calm.children[0];
+  assert.deepEqual(svg.children.filter(label).map(c => c.textContent), ['0.0', '2.8', '5.6', '8.4', '11.2']);
+  assert.equal(svg.children.some(c => c.tagName === 'text' && c.textContent === 'Y'), true);
+});
+
 // --- Globe ---
 
 test('Globe.draw is a no-op until a snapshot has been set', () => {
