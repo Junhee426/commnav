@@ -65,6 +65,8 @@ function startApp(options = {}) {
     createTextNode: text => text,
     createDocumentFragment: () => new Element(),
   });
+  const modelTools = new Map();
+  if (options.modelContext) document.modelContext = { registerTool: tool => modelTools.set(tool.name, tool) };
   const location = { href: options.href || 'https://example.test/comm-nav', hash: options.hash || '' };
   const historyCalls = [];
   const history = {
@@ -82,12 +84,12 @@ function startApp(options = {}) {
   };
   runInNewContext(source, {
     ...engine, document,
-    window: { matchMedia: () => ({ matches: false }) },
+    window: Object.assign(new EventTarget(), { matchMedia: () => ({ matches: false }) }),
     location, history, navigator,
     Globe: class { set() {} center(lat, lon) { centers.push([lat, lon]); } draw() {} },
     skyPlot() {}, lineChart: options.lineChart || (() => {}),
     ResizeObserver: class { observe() {} },
-    Worker, URL, Blob, setTimeout, clearTimeout, setInterval, clearInterval,
+    Worker, URL, Blob, AbortController, setTimeout, clearTimeout, setInterval, clearInterval,
   });
   const submit = () => {
     const event = new Event('submit', { cancelable: true });
@@ -95,7 +97,7 @@ function startApp(options = {}) {
     assert.equal(event.defaultPrevented, true, 'form submission must not reload the page');
   };
   const click = id => get(id).dispatchEvent(new Event('click'));
-  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard, createdElements };
+  return { get, form, workers, submit, click, centers, location, historyCalls, clipboard, createdElements, modelTools };
 }
 
 test('submitting settings reruns analysis with the latest input and opens the results', () => {
@@ -233,6 +235,60 @@ test('sharing the default scenario produces a link with no hash', async () => {
   click('share-config');
   await Promise.resolve();
   assert.ok(!clipboard.text.includes('#'));
+});
+
+test('sharing commits a pending input before the debounce fires', async () => {
+  const { form, workers, click, clipboard, get } = startApp();
+  workers[0].complete();
+  form.elements.altitude.value = '900';
+  form.dispatchEvent(new Event('input'));
+  click('share-config');
+  await Promise.resolve();
+  assert.deepEqual(JSON.parse(decodeURIComponent(clipboard.text.split('cfg=')[1])), { altitude: 900 });
+  assert.equal(get('analysis-note').classList.contains('stale'), true);
+  assert.equal(workers.length, 1, 'sharing updates the snapshot without running a new daily analysis');
+});
+
+test('sharing invalid input does not copy or replace the previous link', async () => {
+  const { form, workers, click, clipboard, historyCalls, get } = startApp();
+  workers[0].complete();
+  click('share-config');
+  await Promise.resolve();
+  const previous = clipboard.text;
+  form.elements.altitude.value = '';
+  form.dispatchEvent(new Event('input'));
+  click('share-config');
+  await Promise.resolve();
+  assert.equal(clipboard.text, previous);
+  assert.equal(historyCalls.length, 1);
+  assert.equal(get('config-error').hidden, false);
+  assert.match(get('share-status').textContent, /입력 오류/);
+});
+
+test('model tools and restored links preserve the same continuous settings', () => {
+  const settings = { altitude: 900, payloadPercent: 33, sharing: 'time', navShare: 10.5 };
+  const { modelTools, form, workers, submit } = startApp({ modelContext: true });
+  workers[0].complete();
+  const tool = modelTools.get('configure_comm_nav');
+  assert.equal(modelTools.size, 4);
+  assert.equal(tool.inputSchema.properties.settings.properties.planes.type, 'integer');
+  assert.equal(tool.inputSchema.properties.settings.properties.altitude.minimum, 400);
+  const configured = tool.execute({ settings });
+  for (const [key, value] of Object.entries(settings)) {
+    assert.equal(configured.config[key], value);
+    assert.equal(form.elements[key].value, String(value));
+  }
+  submit();
+  workers[1].complete();
+  const restored = startApp({ hash: '#cfg=' + encodeURIComponent(JSON.stringify(settings)) });
+  for (const [key, value] of Object.entries(settings)) {
+    assert.equal(workers[1].request.config[key], value);
+    assert.equal(restored.workers[0].request.config[key], value);
+  }
+  restored.workers[0].complete();
+  assert.throws(() => tool.execute({ settings: { planes: 2.5 } }), /정수/);
+  assert.throws(() => tool.execute({ settings: { altitude: 2001 } }), /altitude/);
+  assert.equal(form.elements.altitude.value, '900', 'invalid tool requests must not mutate the form');
 });
 
 test('switching the sweep axis updates the trade-study intro text', () => {

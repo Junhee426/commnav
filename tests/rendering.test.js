@@ -172,6 +172,46 @@ test('lineChart breaks the path at gaps instead of interpolating across missing 
   const lines = path.attributes.d.match(/L/g) || [];
   assert.equal(moves.length, 2); // one new subpath per finite run
   assert.equal(lines.length, 0); // each run has only one point, so no L segment
+  const markers = svg.children.filter(c => c.tagName === 'circle');
+  assert.equal(markers.length, 2, 'isolated valid samples remain visible without connecting the gap');
+  for (const marker of markers) {
+    assert.equal(marker.attributes.fill, '#fff');
+    assert.ok(Number(marker.attributes.r) > 0);
+  }
+  close(Number(markers[0].attributes.cx), 58);
+  close(Number(markers[1].attributes.cx), 58 + 2 / 24 * (400 - 58 - 22));
+});
+
+test('lineChart marks only isolated samples, including log-scale gaps and a single-sample series', () => {
+  const container = new FakeElement('div');
+  const rows = [0, 1, 2, 3, 4, 5].map((hours, i) => ({
+    hours, value: [1, 2, null, 10, 0, 100][i], single: i === 2 ? 5 : null,
+  }));
+  lineChart(container, rows, [{ key: 'value', color: '#111' }, { key: 'single', color: '#222' }], { yScale: 'log' });
+  const svg = container.children[0];
+  const markers = svg.children.filter(c => c.tagName === 'circle');
+  assert.deepEqual(markers.map(c => c.attributes.fill), ['#111', '#111', '#222']);
+  const markerHours = markers.map(c => (Number(c.attributes.cx) - 58) / (400 - 58 - 22) * 24);
+  markerHours.forEach((hours, i) => close(hours, [3, 5, 2][i]));
+  const paths = svg.children.filter(c => c.tagName === 'path');
+  assert.equal((paths[0].attributes.d.match(/L/g) || []).length, 1, 'only the adjacent positive pair is connected');
+  assert.equal((paths[1].attributes.d.match(/L/g) || []).length, 0);
+  assert.ok(markers.every(c => Number.isFinite(Number(c.attributes.cy))), 'all markers have finite log coordinates');
+});
+
+test('lineChart shows all six valid daily navigation samples at a 56 degree elevation mask', () => {
+  const config = { ...cfg, navElevation: 56 }, orbits = engine.buildConstellations(config);
+  const rows = Array.from({ length: 288 }, (_, i) => ({
+    hours: i / 12, value: engine.snapshot(config, i * 5, orbits).fusion.hrms,
+  }));
+  const valid = rows.filter(p => Number.isFinite(p.value));
+  assert.equal(valid.length, 6, 'the regression scenario has six successful position solutions');
+  const container = new FakeElement('div');
+  lineChart(container, rows, [{ key: 'value', color: '#48d4f0' }]);
+  const svg = container.children[0], markers = svg.children.filter(c => c.tagName === 'circle');
+  assert.equal(markers.length, valid.length, 'successful samples must not disappear into the unavailable gaps');
+  markers.forEach((marker, i) => close(Number(marker.attributes.cx), 58 + valid[i].hours / 24 * (400 - 58 - 22)));
+  assert.equal(svg.children.find(c => c.tagName === 'path').attributes.d.includes('L'), false);
 });
 
 test('lineChart multi-series charts draw one path per series in matching colors', () => {
@@ -223,6 +263,29 @@ test('Globe.draw is a no-op until a snapshot has been set', () => {
   const canvas = fakeCanvas();
   new Globe(canvas);
   assert.equal(canvas.ctx.calls.length, 0);
+});
+
+test('Globe keeps a front orbit segment visible over Earth while hiding its rear counterpart', () => {
+  const [orbit] = engine.buildConstellations({ ...cfg, altitude: 500, inclination: 60, planes: 1, satellitesPerPlane: 4 });
+  const canvas = fakeCanvas(300, 200), globe = new Globe(canvas);
+  globe.center(0, 90);
+  globe.set({
+    minutes: 0, observer: [0, -engine.EARTH_RADIUS, 0],
+    satellites: [], best: null, location: { name: 'test' },
+  }, [orbit]);
+  // From this camera, the inclined orbit's top is in front of Earth and the
+  // bottom is behind it. Both project inside the opaque Earth disk.
+  const projectedHeight = 86 * Math.sin(Math.PI / 3);
+  const earthRadius = 86 * engine.EARTH_RADIUS / orbit.radius;
+  assert.ok(projectedHeight < earthRadius);
+  const calls = canvas.ctx.calls;
+  const atPoint = (call, y) => ['moveTo', 'lineTo'].includes(call.method)
+    && Math.abs(call.args[0] - 150) < 1e-6 && Math.abs(call.args[1] - y) < 1e-6;
+  assert.ok(calls.some(call => atPoint(call, 102 - projectedHeight)), 'the front segment is drawn');
+  assert.equal(calls.some(call => atPoint(call, 102 + projectedHeight)), false, 'the rear segment stays occluded');
+  const orbitStroke = calls.findIndex(call => call.method === 'stroke');
+  const earthImage = calls.findIndex(call => call.method === 'drawImage');
+  assert.ok(earthImage >= 0 && orbitStroke > earthImage, 'Earth must not paint over the front orbit segment');
 });
 
 test('Globe centered on the observer places its marker exactly at the canvas center, scaled by devicePixelRatio', () => {

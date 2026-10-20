@@ -81,6 +81,13 @@ export class Globe {
     const project = p => ({ x: cx + dot(p, frame.east) / EARTH_RADIUS * radius,
       y: cy - dot(p, frame.north) / EARTH_RADIUS * radius, z: dot(p, frame.up) / EARTH_RADIUS });
     const unoccluded = q => q.z >= 0 || Math.hypot(q.x - cx, q.y - cy) >= radius;
+    const gradient = ctx.createRadialGradient(cx, cy, radius * .96, cx, cy, radius * 1.09);
+    gradient.addColorStop(0, 'rgba(43,150,201,.24)'); gradient.addColorStop(1, 'rgba(43,150,201,0)');
+    ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(cx, cy, radius * 1.09, 0, TWO_PI); ctx.fill();
+    const textureSize = Math.max(32, Math.min(650, Math.round(radius * 2 * dpr)));
+    ctx.drawImage(this.background(textureSize, frame), cx - radius, cy - radius, radius * 2, radius * 2);
+    // Visible front-side orbit segments can project inside the Earth disk.
+    // Paint them over the globe; unoccluded still excludes the hidden rear side.
     const orbitPlanes = new Map();
     shown.forEach(o => { const key = o.group + ':' + o.raan.toFixed(6) + ':' + o.inclination.toFixed(6); if (!orbitPlanes.has(key)) orbitPlanes.set(key, o); });
     ctx.lineWidth = .65;
@@ -95,11 +102,6 @@ export class Globe {
       }
       ctx.stroke();
     }
-    const gradient = ctx.createRadialGradient(cx, cy, radius * .96, cx, cy, radius * 1.09);
-    gradient.addColorStop(0, 'rgba(43,150,201,.24)'); gradient.addColorStop(1, 'rgba(43,150,201,0)');
-    ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(cx, cy, radius * 1.09, 0, TWO_PI); ctx.fill();
-    const textureSize = Math.max(32, Math.min(650, Math.round(radius * 2 * dpr)));
-    ctx.drawImage(this.background(textureSize, frame), cx - radius, cy - radius, radius * 2, radius * 2);
     const obs = project(this.snapshot.observer);
     if (obs.z >= 0) {
       for (const sat of this.snapshot.satellites) {
@@ -201,9 +203,12 @@ export function lineChart(container, points, series, options = {}) {
   }
   for (const s of series) {
     let path = '', open = false;
-    for (const p of points) {
+    for (const [i, p] of points.entries()) {
       const v = p[s.key];
       if (!plotted(v)) { open = false; continue; }
+      // A run containing one sample has no stroked line segment.
+      if (!open && !plotted(points[i + 1]?.[s.key]))
+        svg.append(node('circle', { cx: x(p[xKey]), cy: y(v), r: 3, fill: s.color }));
       path += (open ? 'L' : 'M') + x(p[xKey]).toFixed(2) + ' ' + y(v).toFixed(2) + ' '; open = true;
     }
     svg.append(node('path', { d: path, stroke: s.color, 'stroke-width': s.width || 2, fill: 'none', 'stroke-linejoin': 'round' }));

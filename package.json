@@ -4,10 +4,16 @@
   "private": true,
   "type": "module",
   "description": "Deterministic K-LEO communications and navigation design simulator",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "build": "node scripts/verify-static.mjs && npm test",
     "test": "node --test tests/*.test.js",
+    "test:browser": "playwright test --config tests/browser/playwright.config.mjs",
     "start": "python3 -m http.server 8000 --directory dist"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
   }
 }

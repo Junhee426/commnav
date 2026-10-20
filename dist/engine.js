@@ -4,6 +4,7 @@ export const EARTH_RADIUS = 6378.137; // km; spherical Earth approximation
 export const MU = 398600.4418; // km^3/s^2
 export const EARTH_RATE = 7.292115e-5; // rad/s
 export const C = 299792458; // m/s, exact
+export const MAX_LEO_SATELLITES = 512;
 const TAU = 2 * Math.PI;
 const RAD = Math.PI / 180;
 // Canonical satellite-group tags. engine.js and rendering.js both branch on these three
@@ -28,28 +29,39 @@ export const DEFAULT_CONFIG = Object.freeze({
   eirp: 45, gt: 5, bandwidth: 100, frequency: 20, rainLoss: 4,
   horizontalTarget: 10, rateTarget: 100,
 });
+// One contract for engine inputs, restored URLs, HTML controls and model tools.
+// Continuous values stay continuous; only constellation counts must be integers.
+const numeric = (minimum, maximum, type = 'number') => ({ type, minimum, maximum });
+export const CONFIG_SCHEMA = Object.freeze(Object.fromEntries(Object.entries({
+  altitude: numeric(400, 2000), inclination: numeric(0, 90),
+  planes: numeric(1, 32, 'integer'), satellitesPerPlane: numeric(4, 32, 'integer'),
+  location: { type: 'string', enum: Object.freeze([...Object.keys(LOCATIONS), 'custom']) },
+  latitude: numeric(-90, 90), longitude: numeric(-180, 180),
+  commElevation: numeric(5, 60), navElevation: numeric(5, 60),
+  leoNav: { type: 'boolean' }, payloadPercent: numeric(0, 100), regional: { type: 'boolean' },
+  sharing: { type: 'string', enum: Object.freeze(['separate', 'time']) }, navShare: numeric(0, 40),
+  gnssSigma: numeric(0.1, 30), leoSigma: numeric(0.1, 30), orbitSigma: numeric(0, 30), clockNs: numeric(0, 1000),
+  eirp: numeric(20, 65), gt: numeric(-10, 30), bandwidth: numeric(1, 500),
+  frequency: numeric(10, 40), rainLoss: numeric(0, 40),
+  horizontalTarget: numeric(0.1, 100), rateTarget: numeric(1, 1000),
+}).map(([key, spec]) => [key, Object.freeze(spec)])));
 export function validateConfig(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('설정 형식을 확인해 주세요.');
-  const known = new Set(Object.keys(DEFAULT_CONFIG));
-  for (const key of Object.keys(input)) if (!known.has(key)) throw new Error('알 수 없는 설정: ' + key);
+  for (const key of Object.keys(input)) if (!Object.hasOwn(CONFIG_SCHEMA, key)) throw new Error('알 수 없는 설정: ' + key);
   const cfg = { ...DEFAULT_CONFIG, ...input };
-  const limits = {
-    altitude: [400, 2000], inclination: [0, 90], planes: [1, 32], satellitesPerPlane: [4, 32],
-    latitude: [-90, 90], longitude: [-180, 180],
-    commElevation: [5, 60], navElevation: [5, 60], payloadPercent: [0, 100], navShare: [0, 40],
-    gnssSigma: [0.1, 30], leoSigma: [0.1, 30], orbitSigma: [0, 30], clockNs: [0, 1000],
-    eirp: [20, 65], gt: [-10, 30], bandwidth: [1, 500], frequency: [10, 40], rainLoss: [0, 40],
-    horizontalTarget: [0.1, 100], rateTarget: [1, 1000],
-  };
-  for (const [key, [lo, hi]] of Object.entries(limits)) {
-    if (typeof cfg[key] !== 'number' || !Number.isFinite(cfg[key]) || cfg[key] < lo || cfg[key] > hi)
-      throw new Error(key + ': ' + lo + '–' + hi + ' 범위의 수치를 입력해 주세요.');
+  for (const [key, spec] of Object.entries(CONFIG_SCHEMA)) {
+    const value = cfg[key];
+    if (spec.type === 'number' || spec.type === 'integer') {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < spec.minimum || value > spec.maximum)
+        throw new Error(key + ': ' + spec.minimum + '–' + spec.maximum + ' 범위의 수치를 입력해 주세요.');
+      if (spec.type === 'integer' && !Number.isInteger(value)) throw new Error('궤도면·위성 수는 정수여야 합니다.');
+    } else if (typeof value !== spec.type || (spec.enum && !spec.enum.includes(value))) {
+      if (key === 'location') throw new Error('관측지를 선택해 주세요.');
+      if (key === 'sharing') throw new Error('신호 공유 방식을 선택해 주세요.');
+      throw new Error(key + ' 값을 확인해 주세요.');
+    }
   }
-  if (!Number.isInteger(cfg.planes) || !Number.isInteger(cfg.satellitesPerPlane)) throw new Error('궤도면·위성 수는 정수여야 합니다.');
-  if (cfg.planes * cfg.satellitesPerPlane > 512) throw new Error('LEO 위성은 총 512기까지 계산합니다. 궤도면 수 또는 면당 위성 수를 줄여 주세요.');
-  for (const key of ['leoNav', 'regional']) if (typeof cfg[key] !== 'boolean') throw new Error(key + ' 값을 확인해 주세요.');
-  if (typeof cfg.location !== 'string' || (cfg.location !== 'custom' && !Object.hasOwn(LOCATIONS, cfg.location))) throw new Error('관측지를 선택해 주세요.');
-  if (!['separate', 'time'].includes(cfg.sharing)) throw new Error('신호 공유 방식을 선택해 주세요.');
+  if (cfg.planes * cfg.satellitesPerPlane > MAX_LEO_SATELLITES) throw new Error(`LEO 위성은 총 ${MAX_LEO_SATELLITES}기까지 계산합니다. 궤도면 수 또는 면당 위성 수를 줄여 주세요.`);
   return cfg;
 }
 export function getLocation(config) {
@@ -295,15 +307,13 @@ export function summarize(samples, config) {
 export function resourceSweep(config, minutes) {
   return parameterSweep(config, minutes, 'navShare');
 }
-// Ranges mirror validateConfig's own limits for each field.
-export const SWEEP_SPECS = Object.freeze({
-  navShare: { min: 0, max: 40, steps: 21 },
-  altitude: { min: 400, max: 2000, steps: 17 },
-  inclination: { min: 0, max: 90, steps: 19 },
-  planes: { min: 1, max: 32, steps: 32, integer: true },
-  satellitesPerPlane: { min: 4, max: 32, steps: 15, integer: true },
-  payloadPercent: { min: 0, max: 100, steps: 21 },
-});
+// Sweep density is independent; admissible bounds come from the input contract.
+export const SWEEP_SPECS = Object.freeze(Object.fromEntries(Object.entries({
+  navShare: 21, altitude: 17, inclination: 19, planes: 32, satellitesPerPlane: 15, payloadPercent: 21,
+}).map(([key, steps]) => [key, Object.freeze({
+  min: CONFIG_SCHEMA[key].minimum, max: CONFIG_SCHEMA[key].maximum, steps,
+  integer: CONFIG_SCHEMA[key].type === 'integer',
+})])));
 export const SWEEP_AXES = Object.keys(SWEEP_SPECS);
 function sweepAxisPoints({ min, max, steps, integer }) {
   return Array.from({ length: steps }, (_, i) => {
@@ -317,19 +327,20 @@ function sweepAxisPoints({ min, max, steps, integer }) {
 // happens to be infeasible (e.g. planes × satellitesPerPlane > 512) are marked
 // unavailable instead of aborting the whole sweep.
 export function parameterSweep(config, minutes, axis = 'navShare') {
+  if (typeof axis !== 'string' || !Object.hasOwn(SWEEP_SPECS, axis)) throw new Error('지원하지 않는 스윕 변수: ' + String(axis));
   const spec = SWEEP_SPECS[axis];
-  if (!spec) throw new Error('지원하지 않는 스윕 변수: ' + axis);
   const base = axis === 'navShare' ? { ...validateConfig(config), sharing: 'time' } : validateConfig(config);
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 1440) throw new Error('시각은 0–1440분 범위입니다.');
   // navShare alone doesn't change satellite geometry, so it can reuse one prepared geometry.
   const sharedGeometry = axis === 'navShare' ? prepareGeometry(base, minutes) : null;
   return sweepAxisPoints(spec).map(value => {
-    try {
-      const cfg = validateConfig({ ...base, [axis]: value });
-      const geometry = sharedGeometry || prepareGeometry(cfg, minutes);
-      const s = evaluateSnapshot(cfg, geometry);
-      return { [axis]: value, rate: s.rate, hrms: s.fusion.hrms, unavailable: false };
-    } catch {
+    const candidate = { ...base, [axis]: value };
+    if (candidate.planes * candidate.satellitesPerPlane > MAX_LEO_SATELLITES) {
       return { [axis]: value, rate: null, hrms: null, unavailable: true };
     }
+    const cfg = validateConfig(candidate);
+    const geometry = sharedGeometry || prepareGeometry(cfg, minutes);
+    const s = evaluateSnapshot(cfg, geometry);
+    return { [axis]: value, rate: s.rate, hrms: s.fusion.hrms, unavailable: false };
   });
 }

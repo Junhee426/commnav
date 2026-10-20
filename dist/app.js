@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, SWEEP_SPECS, MODEL_VERSION } from './engine.js';
+import { DEFAULT_CONFIG, CONFIG_SCHEMA, getLocation, validateConfig, buildConstellations, snapshot, parameterSweep, SWEEP_SPECS, MODEL_VERSION } from './engine.js';
 import { Globe, skyPlot, lineChart } from './rendering.js';
 
 const $ = id => document.getElementById(id);
@@ -28,6 +28,13 @@ const SWEEP_AXIS_META = {
 const orbitKeys = ['altitude', 'inclination', 'planes', 'satellitesPerPlane', 'leoNav', 'payloadPercent', 'regional'];
 const globe = new Globe($('globe'));
 const fields = [...form.querySelectorAll('[data-config]')];
+for (const field of fields) {
+  const spec = CONFIG_SCHEMA[field.dataset.config];
+  if (spec.type === 'number' || spec.type === 'integer') {
+    field.min = String(spec.minimum); field.max = String(spec.maximum);
+    field.step = spec.type === 'integer' ? '1' : 'any';
+  }
+}
 function syncFieldsToConfig(cfg) {
   for (const field of fields) { const key = field.dataset.config; if (field.type === 'checkbox') field.checked = cfg[key]; else field.value = String(cfg[key]); }
 }
@@ -51,9 +58,14 @@ function readConfig() {
   const read = { ...config };
   for (const field of fields) {
     const key = field.dataset.config;
-    read[key] = field.type === 'checkbox' ? field.checked : ['location', 'sharing'].includes(key) ? field.value : field.value.trim() === '' ? NaN : Number(field.value);
+    const type = CONFIG_SCHEMA[key].type;
+    read[key] = type === 'boolean' ? field.checked : type === 'string' ? field.value : field.value.trim() === '' ? NaN : Number(field.value);
   }
   return validateConfig(read);
+}
+function commitFormConfig() {
+  clearTimeout(scheduled);
+  acceptConfig(readConfig());
 }
 function reportError(message) { text('config-error', message); $('config-error').hidden = false; }
 function clearError() { $('config-error').hidden = true; }
@@ -73,7 +85,8 @@ function updateControlLabels() {
   $('custom-location').hidden = config.location !== 'custom';
   form.elements.latitude.disabled = form.elements.longitude.disabled = config.location !== 'custom';
   text('constellation-note', `${config.planes}면 × 면당 ${config.satellitesPerPlane}기 = 총 ${config.planes * config.satellitesPerPlane}기 · Walker Delta F=1`);
-  text('payload-value', config.payloadPercent + '%'); text('share-value', config.navShare + '%');
+  text('payload-value', config.payloadPercent.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + '%');
+  text('share-value', config.navShare.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + '%');
   const share = form.elements.navShare;
   share.disabled = config.sharing === 'separate' || !config.leoNav || config.payloadPercent === 0;
   form.elements.payloadPercent.disabled = !config.leoNav;
@@ -122,7 +135,7 @@ function acceptConfig(next) {
 }
 form.addEventListener('input', () => {
   clearTimeout(scheduled);
-  scheduled = setTimeout(() => { try { acceptConfig(readConfig()); } catch (error) { reportError(error.message); } }, 90);
+  scheduled = setTimeout(() => { try { commitFormConfig(); } catch (error) { reportError(error.message); } }, 90);
 });
 form.addEventListener('submit', event => {
   event.preventDefault();
@@ -172,7 +185,7 @@ function finishCalculation(error) {
   updateAnalysisNotice();
 }
 function runAnalysis(navigate = false) {
-  try { clearTimeout(scheduled); acceptConfig(readConfig()); } catch (error) { reportError(error.message); return Promise.reject(error); }
+  try { commitFormConfig(); } catch (error) { reportError(error.message); return Promise.reject(error); }
   if (calculating) return Promise.reject(new Error('현재 분석이 진행 중입니다.'));
   calculating = true; job++;
   $('run-analysis').disabled = true; text('run-analysis', '분석 중…');
@@ -274,12 +287,6 @@ function toolSummary() {
 }
 function configureFromTool(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(k => k !== 'settings') || !input.settings || typeof input.settings !== 'object' || Array.isArray(input.settings)) throw new Error('settings 객체가 필요합니다.');
-  const allowed = new Map(fields.map(f => [f.dataset.config, f]));
-  for (const [key, value] of Object.entries(input.settings)) {
-    const field = allowed.get(key); if (!field) throw new Error('설정할 수 없는 항목: ' + key);
-    if (field.tagName === 'SELECT' && ![...field.options].some(o => o.value === String(value))) throw new Error('지원하는 선택값이 아닙니다: ' + key);
-    if (field.type === 'range' && ((value - Number(field.min)) / Number(field.step || 1)) % 1 !== 0) throw new Error('설정 간격을 확인해 주세요: ' + key);
-  }
   const validated = validateConfig({ ...config, ...input.settings });
   clearTimeout(scheduled);
   syncFieldsToConfig(validated);
@@ -290,19 +297,7 @@ function registerModelTools() {
   if (!context?.registerTool) return;
   const lifecycle = new AbortController();
   window.addEventListener('pagehide', () => lifecycle.abort(), { once: true });
-  const properties = {};
-  for (const field of fields) {
-    const key = field.dataset.config;
-    if (field.type === 'checkbox') properties[key] = { type: 'boolean' };
-    else if (field.tagName === 'SELECT') properties[key] = { type: ['location', 'sharing'].includes(key) ? 'string' : 'number', enum: [...field.options].map(o => ['location', 'sharing'].includes(key) ? o.value : Number(o.value)) };
-    else {
-      properties[key] = { type: 'number', minimum: Number(field.min), maximum: Number(field.max) };
-      // Range inputs (min="0" here) are only accepted at exact step multiples by
-      // configureFromTool below; advertise that so a caller building a request straight from
-      // this schema doesn't pick an in-range value the runtime check then rejects.
-      if (field.type === 'range' && Number(field.step)) properties[key].multipleOf = Number(field.step);
-    }
-  }
+  const properties = CONFIG_SCHEMA;
   const tools = [
     { name: 'get_comm_nav_state', title: '통신·항법 상태 읽기', description: '현재 설정, 현재시각의 예측값과 마지막 24시간 분석 요약을 읽습니다. stale은 이전 설정의 결과임을 나타냅니다.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, untrustedContentHint: false }, execute: input => { if (!input || Object.keys(input).length) throw new Error('입력 항목이 없습니다.'); return toolSummary(); } },
     { name: 'configure_comm_nav', title: '통신·항법 설정 변경', description: '화면의 시나리오 설정을 변경하고 현재시각의 결과를 갱신합니다. 24시간 분석은 별도로 실행합니다.', inputSchema: { type: 'object', properties: { settings: { type: 'object', properties, additionalProperties: false } }, required: ['settings'], additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute: configureFromTool },
@@ -319,6 +314,11 @@ function registerModelTools() {
 }
 syncFieldsToConfig(config);
 $('share-config').addEventListener('click', async () => {
+  try { commitFormConfig(); } catch (error) {
+    reportError(error.message);
+    text('share-status', '입력 오류를 수정한 뒤 공유해 주세요.');
+    return;
+  }
   const url = shareUrl(config);
   history.replaceState(null, '', url);
   try {

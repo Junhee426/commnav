@@ -27,7 +27,7 @@
       <form id="configuration" novalidate>
         <section class="control-section">
           <h2><span>01</span> 위성군과 관측지</h2>
-          <label class="field"><span>궤도 고도</span><select name="altitude" data-config="altitude"><option value="500">500 km</option><option value="888" selected>888 km</option><option value="1280">1,280 km</option></select></label>
+          <label class="field"><span>궤도 고도 <small>km</small></span><input name="altitude" data-config="altitude" type="number" min="400" max="2000" step="any" value="888"></label>
           <div class="field-pair">
             <label class="field"><span>궤도면 수</span><input name="planes" data-config="planes" type="number" min="1" max="32" step="1" value="16"></label>
             <label class="field"><span>경사각 <small>°</small></span><input name="inclination" data-config="inclination" type="number" min="0" max="90" step="1" value="42"></label>
@@ -51,9 +51,9 @@
         <section class="control-section">
           <h2><span>02</span> 항법 구성과 자원</h2>
           <label class="check-field"><input name="leoNav" data-config="leoNav" type="checkbox" checked><span>LEO 항법 탑재체 사용</span></label>
-          <label class="field"><span>항법 탑재 위성 비율 <output id="payload-value">100%</output></span><input name="payloadPercent" data-config="payloadPercent" type="range" min="0" max="100" step="25" value="100"></label>
+          <label class="field"><span>항법 탑재 위성 비율 <output id="payload-value">100%</output></span><input name="payloadPercent" data-config="payloadPercent" type="range" min="0" max="100" step="any" value="100"></label>
           <label class="field"><span>통신·항법 신호 구성</span><select name="sharing" data-config="sharing"><option value="separate">신호 분리 · 플랫폼 공유</option><option value="time">시간 공유 · 자원 배분</option></select></label>
-          <label class="field" id="share-field"><span>항법 배정시간 <output id="share-value">10%</output></span><input name="navShare" data-config="navShare" type="range" min="0" max="40" step="1" value="10" disabled></label>
+          <label class="field" id="share-field"><span>항법 배정시간 <output id="share-value">10%</output></span><input name="navShare" data-config="navShare" type="range" min="0" max="40" step="any" value="10" disabled></label>
           <p class="field-note" id="sharing-note">신호 분리 모드에서는 통신 시간을 차감하지 않습니다.</p>
           <label class="check-field"><input name="regional" data-config="regional" type="checkbox"><span>지역항법 8기 예시 추가</span></label>
           <p class="field-note">3 GEO + 5 IGSO 가상 배치 · 공식 KPS 궤도 아님</p>
