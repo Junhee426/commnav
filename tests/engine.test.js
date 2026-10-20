@@ -184,8 +184,23 @@ test('parameterSweep on navShare reproduces resourceSweep exactly', () => {
   assert.deepEqual(parameterSweep(cfg, 0, 'navShare'), resourceSweep(cfg, 0).map(p => ({ ...p, unavailable: false })));
 });
 
-test('parameterSweep rejects an unsupported axis', () => {
-  assert.throws(() => parameterSweep(cfg, 0, 'notAnAxis'));
+test('parameterSweep rejects unsupported axes, inherited properties, and non-string keys', () => {
+  for (const axis of ['notAnAxis', 'toString', 'constructor', '__proto__', ['altitude'], new String('altitude'), null, Symbol('altitude')]) {
+    assert.throws(() => parameterSweep(cfg, 0, axis), /지원하지 않는 스윕 변수/);
+  }
+});
+
+test('every sweep axis rejects invalid times instead of marking points unavailable', () => {
+  for (const axis of SWEEP_AXES) for (const minutes of [-1, 1440.01, NaN, Infinity, '0', undefined]) {
+    assert.throws(() => parameterSweep(cfg, minutes, axis), /시각은 0–1440분 범위/);
+  }
+});
+
+test('sweeps propagate unexpected orbit calculation errors', t => {
+  t.mock.method(Math, 'sin', () => { throw new Error('orbit calculation failed'); });
+  for (const axis of SWEEP_AXES) {
+    assert.throws(() => parameterSweep(cfg, 0, axis), /orbit calculation failed/);
+  }
 });
 
 test('altitude sweep covers the full validated range and stays available throughout', () => {
@@ -195,18 +210,21 @@ test('altitude sweep covers the full validated range and stays available through
   assert.ok(points.every(p => !p.unavailable && Number.isFinite(p.rate) && Number.isFinite(p.hrms)));
 });
 
-test('planes sweep marks combinations exceeding the 512-satellite cap as unavailable, not a crash', () => {
-  const points = parameterSweep({ ...cfg, satellitesPerPlane: 32 }, 0, 'planes');
-  const overCap = points.filter(p => p.planes * 32 > 512);
-  const underCap = points.filter(p => p.planes * 32 <= 512);
-  assert.ok(overCap.length > 0 && underCap.length > 0);
-  assert.ok(overCap.every(p => p.unavailable && p.rate === null));
-  assert.ok(underCap.every(p => !p.unavailable));
+test('constellation-size sweeps mark combinations exceeding the 512-satellite cap as unavailable', () => {
+  for (const axis of ['planes', 'satellitesPerPlane']) {
+    const base = axis === 'planes' ? { ...cfg, satellitesPerPlane: 32 } : { ...cfg, planes: 32 };
+    const points = parameterSweep(base, 0, axis);
+    const overCap = points.filter(p => p[axis] * 32 > 512);
+    const underCap = points.filter(p => p[axis] * 32 <= 512);
+    assert.ok(overCap.length > 0 && underCap.length > 0);
+    assert.ok(overCap.every(p => p.unavailable && p.rate === null && p.hrms === null));
+    assert.ok(underCap.every(p => !p.unavailable));
+  }
 });
 
 test('every advertised sweep axis runs end to end', () => {
-  for (const axis of SWEEP_AXES) {
-    const points = parameterSweep(cfg, 0, axis);
+  for (const axis of SWEEP_AXES) for (const minutes of [0, 1440]) {
+    const points = parameterSweep(cfg, minutes, axis);
     assert.ok(points.length > 1);
     assert.ok(points.some(p => !p.unavailable));
   }
